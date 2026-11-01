@@ -1,0 +1,3264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>尼康优化校准查看器</title>
+<style>:root {
+  --bg: #14161a;
+  --panel: #1c1f25;
+  --panel2: #23262d;
+  --line: #2f333c;
+  --text: #e6e8ec;
+  --dim: #8b929e;
+  --accent: #5aa9ff;
+  --warn: #d9a441;
+  --err: #d9534f;
+  --sans: "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei UI", "Segoe UI", sans-serif;
+  --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", serif;
+  --mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 400 14px/1.7 var(--sans);
+  font-synthesis: none;          /* 中文不许靠合成加粗/倾斜凑字重 */
+  padding: 24px;
+}
+
+.wrap { max-width: 1000px; margin: 0 auto; }
+
+h1 { font: 500 19px/1.4 var(--serif); letter-spacing: .02em; margin-bottom: 4px; }
+.sub { color: var(--dim); font-size: 13px; margin-bottom: 20px; }
+
+.drop {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 28px;
+  text-align: center;
+  color: var(--dim);
+  background: var(--panel);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.drop:hover, .drop.over { border-color: var(--accent); background: var(--panel2); }
+.drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-color: var(--accent); }
+.drop b { color: var(--text); }
+.drop .note { text-align: left; }
+
+.grid { display: grid; grid-template-columns: 1fr 300px; gap: 16px; margin-top: 16px; }
+@media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+.card h2 { font-size: 12.5px; font-weight: 500; color: var(--dim); letter-spacing: .06em; margin-bottom: 10px; }
+
+/* 悬浮读数框的定位锚点：没有它 absolute 会跑到整个页面上 */
+.plot { position: relative; }
+
+canvas#curve { width: 100%; height: 380px; display: block; cursor: crosshair; }
+
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--dim); margin-top: 8px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 5px; }
+.legend .dot { width: 7px; height: 7px; border-radius: 50%; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+th { color: var(--dim); font-weight: 400; }
+td.v { text-align: right; font-variant-numeric: tabular-nums; }
+td.na { color: var(--dim); }
+
+.sect { margin-top: 14px; }
+.sect > h3 { font-size: 12px; color: var(--dim); font-weight: 500; margin-bottom: 4px; }
+
+.name { font-size: 16px; font-weight: 600; }
+.name .tag {
+  display: inline-block; margin-left: 8px; padding: 1px 6px;
+  font-size: 10.5px; font-weight: 500; vertical-align: middle;
+  color: var(--accent); background: rgba(90,169,255,.12);
+  border: 1px solid rgba(90,169,255,.3); border-radius: 3px;
+  font-family: var(--mono);
+}
+.file { color: var(--dim); font-size: 11.5px; font-family: var(--mono); margin-top: 3px; word-break: break-all; }
+.cmt { color: var(--dim); font-size: 12px; word-break: break-all; margin-top: 2px; }
+.raw { color: var(--dim); font-style: normal; font-size: 11px; margin-left: 7px; font-family: var(--mono); }
+
+.note {
+  margin-top: 14px; padding: 10px 12px;
+  background: rgba(217,164,65,.08);
+  border-left: 3px solid var(--warn);
+  border-radius: 4px;
+  font-size: 12.5px; line-height: 1.8; color: #cbb894;
+}
+.err { border-left-color: var(--err); background: rgba(217,83,79,.08); color: #e0a5a3; }
+
+#preview {
+  position: relative; margin-top: 8px; overflow: hidden; border-radius: 6px;
+  user-select: none; touch-action: none; cursor: ew-resize;
+}
+#preview canvas { display: block; width: 100%; }
+#pv { position: absolute; inset: 0; }
+#pvHandle {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: rgba(255,255,255,.85); pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+}
+#pvHint { color: var(--dim); font-size: 12.5px; margin-top: 6px; }
+
+.readout {
+  position: absolute; top: 52px; right: 12px;
+  background: rgba(0,0,0,.72); border: 1px solid var(--line);
+  border-radius: 4px; padding: 4px 8px;
+  font-size: 12px; font-variant-numeric: tabular-nums;
+  pointer-events: none; display: none; white-space: nowrap;
+}
+
+.hidden { display: none !important; }
+.muted { color: var(--dim); }
+
+/* 内置示例 */
+.samples { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.samples .lbl { color: var(--dim); font-size: 12.5px; }
+.samples button, .swap button {
+  background: var(--panel2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 11px; font-size: 13px; cursor: pointer;
+  font-family: inherit; transition: border-color .15s, background .15s;
+}
+.samples button:hover, .swap button:hover { border-color: var(--accent); background: #2a2e37; }
+.samples button:focus-visible, .swap button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.samples button:active, .swap button:active { background: var(--panel); }
+.samples button span, .swap button span {
+  color: var(--dim); font-size: 11px; margin-left: 5px;
+  font-family: var(--mono);
+}
+
+.swap {
+  display: flex; align-items: center; gap: 7px;
+  margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.swap > span { color: var(--dim); font-size: 12.5px; }
+
+/* 色块示意 */
+.swgrid { display: flex; flex-wrap: wrap; gap: 12px 18px; }
+.switem { text-align: center; }
+.switem b { display: block; font-size: 12px; font-weight: 500; margin-bottom: 4px; }
+.swpair { display: flex; align-items: center; gap: 4px; justify-content: center; }
+.sw {
+  width: 26px; height: 26px; border-radius: 5px;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.4);
+}
+.swarrow { color: var(--dim); font-size: 11px; }
+.swval { display: block; margin-top: 4px; font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+
+details { margin-top: 6px; }
+summary { cursor: pointer; color: var(--dim); font-size: 12px; }
+details[open] summary { margin-bottom: 4px; }
+
+/* 折叠卡（色彩混合/分级）：summary 充当卡片标题。
+   标题行染柔和紫（区别于蓝色 accent 与琥珀警告色，呼应下方色块），
+   悬停提亮；三角保持灰色；内容区不受影响。 */
+details.card > summary {
+  cursor: pointer; color: #b79ce4; font-size: 13px; font-weight: 600;
+  list-style: none; user-select: none;
+}
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::before { content: "▸"; display: inline-block; width: 14px; color: var(--dim); }
+details.card[open] > summary::before { content: "▾"; }
+details.card > summary:hover { color: #cfb5f2; }
+details.card.colorfold h3 { margin: 14px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
+details.card.colorfold h3:first-of-type { margin-top: 4px; }
+
+/* 解读卡：短句逐行 */
+.interpret p { margin: 4px 0 0; font-size: 13px; }
+.interpret p:first-of-type { margin-top: 0; }
+/* 锚点表（曲线卡片内）：比常规表格更紧凑 */
+table.anchor { margin: 8px 0 0; font-size: 12px; width: 100%; }
+table.anchor th, table.anchor td { padding: 2px 8px 2px 0; border-bottom: 1px solid var(--line); }
+table.anchor th { color: var(--dim); font-weight: 500; }</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>尼康优化校准查看器</h1>
+  <div class="sub">拖入优化校准文件，查看它的色调曲线与各项参数。</div>
+
+  <div id="empty" class="drop" role="button" tabindex="0">
+    把 <b>.NCP</b> 或 <b>.NP3</b> 文件拖到这里<br><br>
+    <span style="font-size:12.5px">或<b>点击选择文件</b></span>
+  </div>
+
+  <div id="samples" class="samples">
+    <span class="lbl">没有文件？先试试内置示例：</span>
+    <button data-s="filmic" data-f="Filmic S 曲线.NP3">Filmic S 曲线<span>.NP3</span></button>
+    <button data-s="color" data-f="重色彩.NP3">重色彩<span>.NP3</span></button>
+    <button data-s="soft" data-f="柔和反差.NCP">柔和反差<span>.NCP</span></button>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="grid">
+      <div>
+        <div class="card plot">
+          <h2>色调曲线</h2>
+          <canvas id="curve"></canvas>
+          <div class="legend">
+            <span><i style="background:#5aa9ff"></i>色调曲线</span>
+            <span><i class="dot" style="background:#ffd479"></i>控制点</span>
+            <span><i style="background:#3a3f4a"></i>45° 恒等线</span>
+          </div>
+
+          <div id="anchorBox" class="hidden"></div>
+
+          <div class="swap">
+            <span>换一个：</span>
+            <button data-s="filmic" data-f="Filmic S 曲线.NP3">Filmic S 曲线<span>.NP3</span></button>
+            <button data-s="color" data-f="重色彩.NP3">重色彩<span>.NP3</span></button>
+            <button data-s="soft" data-f="柔和反差.NCP">柔和反差<span>.NCP</span></button>
+          </div>
+
+          <div class="readout" id="readout"></div>
+        </div>
+
+        <!-- 色彩混合/分级折叠卡：放预览卡上方（默认折叠，点开看色块） -->
+        <div id="colorCards" class="hidden"></div>
+
+        <div class="card sect">
+          <h2>套用自己的照片看看</h2>
+          <div id="pvZone" class="drop" role="button" tabindex="0" style="padding:14px">
+            把 JPG 拖到这里，或<b>点击选择</b>
+          </div>
+          <div id="preview" class="hidden">
+            <canvas id="pvBase"></canvas>
+            <canvas id="pv"></canvas>
+            <div id="pvHandle"></div>
+          </div>
+          <div id="pvHint" class="hidden"></div>
+
+          <div class="note">
+            预览套用<b>色调曲线</b>（与图上那条查找表一一对应）；NP3 文件还会
+            <b>近似模拟</b>色彩混合、色彩分级与整体饱和度。
+            <details><summary>这个模拟可信到什么程度？</summary>
+            尼康没有公开这些参数的确切算法。色彩部分是按通用 HSL 规则做的<b>示意近似</b>：
+            方向来自文件参数，幅度是约定的换算，和相机直出会有明显差别——这正是它叫"近似"的原因。
+            另外，相机直出的照片已经套过一次风格，在这里再套会<b>重复施加</b>，
+            建议用尽量中性的原片来看。</details>
+          </div>
+        </div>
+      </div>
+
+      <div id="side"></div>
+    </div>
+  </div>
+</div>
+
+<script>const SAMPLES = {"filmic":"TkNQAAAAAQAAAAAEMDMxMAAAAgAAAAAURmlsbWljRGVtbwAAAAAAAAAAAAAAAAMAAAAAAgAgAAAEAAAAAAIAAAAABQAAAAAC/wEAAAYAAAAAAoYEAAAHAAAAAAKCBAAACAAAAAAC/wQAAAkAAAAAAv8EAAAKAAAAAAL/BAAACwAAAAAC/wQAAAwAAAAAAv8AAAANAAAAAAL/AAAADgAAAAAC/wQAAA8AAAAAAv8BAAAQAAAAAAL/AQAAEQAAAAAC/wEAABIAAAAAAv8BAAATAAAAAAL/AQAAFAAAAAACgAEAABUAAAAAAv8KAAAWAAAAAAJ8BAAAFwAAAAAC/wQAABgAAAAAAv8EAAAZAAAAAAIBAQAAGgAAAAACAQEAABsAAAAAAgEBAAAcAAAAAAIBAQAAHQAAAAACAQEAAB4AAAAAAn0BAAAfAAAAAByAgICAgICAgICAgICAgICAgICAgICAgIABAQEAAAAgAAAAABSAAICAgACAgIAAgIABAQEAsgGAAQABAQAAAAA25ryU56S677ya5pqX6YOo5Y6L5pqX44CB6auY5YWJ5rua6ZmN55qEIGZpbG1pYyDmm7Lnur8AAAAAAgAAAkJJMAD/AP8BAAUAAEAsgIbA3v//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABwAVACgAQABbAHoAnQDCAOoBFQFDAXMBpgHbAhICTAKIAsYDBgNIA40D0wQbBGUEsQT/BU4FoAXzBkgGnwb3B1EHrAgKCGkIyQkrCY8J9ApaCsMLLAuYDAQMcgziDVMNxQ45Dq4PJQ+dEBYQkRENEYoSCRKJEwoTjRQRFJYVHRWkFi0WuBdDF9AYXhjtGX0aDxqiGzYbyxxhHPkdkh4sHscfYyAAIJ8hPiHfIoEjJCPIJG0lFCW7JmQnDSe4KGQpECm+Km0rHivPLIEtNC3oLp4vVDALMMQxfTI4MvMzsDRtNSw16zasN244MDj0Obg6fjtEPAw81D2dPmg/M0AAQLJBZUIXQshDeEQoRNhFh0Y1RuNHkEg9SOlJlEo/SulLk0w8TORNjE4zTtlPf1AkUMlRbVIQUrNTVVP2VJdVN1XWVnVXE1exWE1Y6VmEWh9auVtSW+tcgl0ZXbBeRV7aX25gAmCUYSZht2JIYtdjZmP0ZIFlDWWZZiRmrmc3Z79oRmjNaVJp12pbat5rYGvhbGJs4W1fbd1uWW7Vb09vyXBCcLlxMHGlchlyjXL/c3Bz4HRPdLx1KXWUdf52Z3bPdzV3mnf9eGB4wXkgeX552no1eo9653s9e5F75Hw1fIR80X0cfWR9q33vfjF+cX6tfud/HX9Qf39/qX/Of+1//wAAAAA=","color":"TkNQAAAAAQAAAAAEMDMxMAAAAgAAAAAUQ29sb3JEZW1vAAAAAAAAAAAAAAAAAAMAAAAAAgAgAAAEAAAAAAIAAAAABQAAAAAC/wEAAAYAAAAAAoIEAAAHAAAAAAKCBAAACAAAAAAC/wQAAAkAAAAAAv8EAAAKAAAAAAL/BAAACwAAAAAC/wQAAAwAAAAAAv8AAAANAAAAAAL/AAAADgAAAAAC/wQAAA8AAAAAAv8BAAAQAAAAAAL/AQAAEQAAAAAC/wEAABIAAAAAAv8BAAATAAAAAAL/AQAAFAAAAAACgAEAABUAAAAAAv8KAAAWAAAAAAKEBAAAFwAAAAAC/wQAABgAAAAAAv8EAAAZAAAAAAIBAQAAGgAAAAACAQEAABsAAAAAAgEBAAAcAAAAAAIBAQAAHQAAAAACAQEAAB4AAAAAAo8BAAAfAAAAAByMlIh4mYpxYoCUZ3aFj4VsnnSKkoB7jIUBAQEAAAAgAAAAABSAKJmIgLSPgID6nnYBAQEAwQFxAQABAQAAAAAs5ryU56S677ya6Imy5b2p5re35ZCI5LiO6Imy5b2p5YiG57qn5ouJ5ruhAAAAAAACAAACQkkwAP8A/wEAAgAA//8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEzAh0C8wO7BHsFNAXoBpcHQgfpCI4JMAnPCm0LCAuiDDkM0A1kDfgOiQ8aD6oQOBDFEVIR3RJoEvETehQCFIkVDxWVFhoWnhchF6QYJxioGSkZqhoqGqkbKBunHCUcoh0fHZweGB6THw8fiSAEIH4g9yFxIekiYiLaI1IjySRAJLclLSWkJhkmjycEJ3kn7ShiKNYpSSm9KjAqoysVK4gr+ixsLN0tTy3ALjEuoS8SL4Iv8jBhMNExQDGvMh4yjTL7M2kz1zRFNLM1IDWNNfs2ZzbUN0E3rTgZOIU48TlcOcg6MzqeOwk7dDvePEk8sz0dPYc98T5aPsQ/LT+WQABAaEDRQTpBokIKQnNC20NDQ6pEEkR5ROFFSEWvRhZGfUbjR0pHsEgXSH1I40lJSa9KFUp6SuBLRUuqTA9MdEzZTT5No04HTmxO0E80T5hP/FBgUMRRJ1GLUe9SUlK1UxhTe1PeVEFUpFUHVWlVzFYuVpBW8ldVV7dYGFh6WNxZPlmfWgFaYlrDWyRbhVvmXEdcqF0JXWldyl4qXote619LX6tgC2BrYMthK2GLYetiSmKqYwljaGPIZCdkhmTlZURlo2YBZmBmv2cdZ3xn2mg5aJdo9WlTabFqD2ptastrKWuGa+RsQmyfbPxtWm23bhRucW7ObytviG/lcEJwn3D8AAAAAA==","soft":"TkNQAAAAAAEAAAAkMDEwMFNvZnRDb250cmFzdAAAAAAAAAAAA8IA/4QBAXaA////AAAAAgAAAkJJMAD/AP8BAAIAAP//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI9glsCeMKWQrQC0cLvQw0DKoNIQ2XDg4OhA77D3EP6BBeENURSxHBEjgSrhMkE5sUERSHFP0VcxXqFmAW1hdMF8IYOBiuGSMZmRoPGoUa+htwG+YcWxzRHUYdvB4xHqYfGx+RIAYgeyDwIWUh2iJOIsMjOCOtJCEkliUKJX8l8yZnJtsnTyfDKDcoqykfKZMqBip6Ku0rYSvULEcsuy0uLaEuFC6GLvkvbC/eMFEwwzE2MagyGjKMMv4zcDPiNFM0xTU3Nag2GTaLNvw3bTfeOE84vzkwOaE6ETqBOvI7YjvSPEI8sj0iPZE+AT5xPuA/Tz++QC5AnUELQXpB6UJYQsZDNEOjRBFEf0TtRVtFyUY3RqRHEkd/R+xIWkjHSTRJoUoOSnpK50tTS8BMLEyZTQVNcU3dTklOtE8gT4xP91BjUM5ROVGkUg9SelLlU1BTu1QlVJBU+lVkVc9WOVajVw1Xd1fhWEpYtFkeWYdZ8VpaWsNbLVuWW/9caFzRXTpdol4LXnRe3F9FX61gFmB+YOZhTmG3Yh9ih2LvY1ZjvmQmZI5k9WVdZcVmLGaUZvtnYmfKaDFomGj/aWdpzmo1apxrA2tqa9FsOGyebQVtbG3TbjpuoG8Hb25v1HA7cKJxCHFvcdVyPHKicwlzb3PWdDx0o3UJdXB11nY8dqN3CQAAAAA="};</script>
+<script>//#region src/base.ts
+const base = Object.freeze([
+	78,
+	67,
+	80,
+	0,
+	0,
+	0,
+	1,
+	0,
+	0,
+	0,
+	0,
+	4,
+	48,
+	51,
+	49,
+	48,
+	0,
+	0,
+	2,
+	0,
+	0,
+	0,
+	0,
+	20,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	3,
+	0,
+	0,
+	0,
+	0,
+	2,
+	0,
+	32,
+	0,
+	0,
+	4,
+	0,
+	0,
+	0,
+	0,
+	2,
+	0,
+	0,
+	0,
+	0,
+	5,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	1,
+	0,
+	0,
+	6,
+	0,
+	0,
+	0,
+	0,
+	2,
+	136,
+	4,
+	0,
+	0,
+	7,
+	0,
+	0,
+	0,
+	0,
+	2,
+	130,
+	4,
+	0,
+	0,
+	8,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	9,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	10,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	11,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	12,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	0,
+	0,
+	0,
+	13,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	0,
+	0,
+	0,
+	14,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	15,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	1,
+	0,
+	0,
+	16,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	1,
+	0,
+	0,
+	17,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	1,
+	0,
+	0,
+	18,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	1,
+	0,
+	0,
+	19,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	1,
+	0,
+	0,
+	20,
+	0,
+	0,
+	0,
+	0,
+	2,
+	128,
+	1,
+	0,
+	0,
+	21,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	10,
+	0,
+	0,
+	22,
+	0,
+	0,
+	0,
+	0,
+	2,
+	132,
+	4,
+	0,
+	0,
+	23,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	24,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	25,
+	0,
+	0,
+	0,
+	0,
+	2,
+	128,
+	1,
+	0,
+	0,
+	26,
+	0,
+	0,
+	0,
+	0,
+	2,
+	128,
+	1,
+	0,
+	0,
+	27,
+	0,
+	0,
+	0,
+	0,
+	2,
+	128,
+	1,
+	0,
+	0,
+	28,
+	0,
+	0,
+	0,
+	0,
+	2,
+	128,
+	1,
+	0,
+	0,
+	29,
+	0,
+	0,
+	0,
+	0,
+	2,
+	128,
+	1,
+	0,
+	0,
+	30,
+	0,
+	0,
+	0,
+	0,
+	2,
+	128,
+	1,
+	0,
+	0,
+	31,
+	0,
+	0,
+	0,
+	0,
+	28,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	1,
+	1,
+	1,
+	0,
+	0,
+	0,
+	32,
+	0,
+	0,
+	0,
+	0,
+	20,
+	128,
+	0,
+	128,
+	128,
+	128,
+	0,
+	128,
+	128,
+	128,
+	0,
+	128,
+	128,
+	1,
+	1,
+	1,
+	0,
+	178,
+	1,
+	128,
+	1,
+	0,
+	0,
+	0,
+	0
+]);
+const baseWithToneCurve = Object.freeze([
+	78,
+	67,
+	80,
+	0,
+	0,
+	0,
+	1,
+	0,
+	0,
+	0,
+	0,
+	4,
+	48,
+	51,
+	49,
+	48,
+	0,
+	0,
+	2,
+	0,
+	0,
+	0,
+	0,
+	20,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	3,
+	0,
+	0,
+	0,
+	0,
+	2,
+	0,
+	32,
+	0,
+	0,
+	4,
+	0,
+	0,
+	0,
+	0,
+	2,
+	0,
+	0,
+	0,
+	0,
+	5,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	1,
+	0,
+	0,
+	6,
+	0,
+	0,
+	0,
+	0,
+	2,
+	136,
+	4,
+	0,
+	0,
+	7,
+	0,
+	0,
+	0,
+	0,
+	2,
+	130,
+	4,
+	0,
+	0,
+	8,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	9,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	10,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	11,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	12,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	0,
+	0,
+	0,
+	13,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	0,
+	0,
+	0,
+	14,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	15,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	1,
+	0,
+	0,
+	16,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	1,
+	0,
+	0,
+	17,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	1,
+	0,
+	0,
+	18,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	1,
+	0,
+	0,
+	19,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	1,
+	0,
+	0,
+	20,
+	0,
+	0,
+	0,
+	0,
+	2,
+	128,
+	1,
+	0,
+	0,
+	21,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	10,
+	0,
+	0,
+	22,
+	0,
+	0,
+	0,
+	0,
+	2,
+	132,
+	4,
+	0,
+	0,
+	23,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	24,
+	0,
+	0,
+	0,
+	0,
+	2,
+	255,
+	4,
+	0,
+	0,
+	25,
+	0,
+	0,
+	0,
+	0,
+	2,
+	1,
+	1,
+	0,
+	0,
+	26,
+	0,
+	0,
+	0,
+	0,
+	2,
+	1,
+	1,
+	0,
+	0,
+	27,
+	0,
+	0,
+	0,
+	0,
+	2,
+	1,
+	1,
+	0,
+	0,
+	28,
+	0,
+	0,
+	0,
+	0,
+	2,
+	1,
+	1,
+	0,
+	0,
+	29,
+	0,
+	0,
+	0,
+	0,
+	2,
+	1,
+	1,
+	0,
+	0,
+	30,
+	0,
+	0,
+	0,
+	0,
+	2,
+	128,
+	1,
+	0,
+	0,
+	31,
+	0,
+	0,
+	0,
+	0,
+	28,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	128,
+	1,
+	1,
+	1,
+	0,
+	0,
+	0,
+	32,
+	0,
+	0,
+	0,
+	0,
+	20,
+	128,
+	0,
+	128,
+	128,
+	128,
+	0,
+	128,
+	128,
+	128,
+	0,
+	128,
+	128,
+	1,
+	1,
+	1,
+	0,
+	178,
+	1,
+	128,
+	1,
+	0,
+	0,
+	0,
+	2,
+	0,
+	0,
+	2,
+	66,
+	73,
+	48,
+	0,
+	255,
+	0,
+	255,
+	1,
+	0,
+	2,
+	0,
+	0,
+	255,
+	255,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	128,
+	1,
+	0,
+	1,
+	128,
+	2,
+	0,
+	2,
+	128,
+	3,
+	0,
+	3,
+	128,
+	4,
+	0,
+	4,
+	128,
+	5,
+	0,
+	5,
+	128,
+	6,
+	0,
+	6,
+	128,
+	7,
+	0,
+	7,
+	128,
+	8,
+	0,
+	8,
+	128,
+	9,
+	0,
+	9,
+	128,
+	10,
+	0,
+	10,
+	128,
+	11,
+	0,
+	11,
+	128,
+	12,
+	0,
+	12,
+	128,
+	13,
+	0,
+	13,
+	128,
+	14,
+	0,
+	14,
+	128,
+	15,
+	0,
+	15,
+	128,
+	16,
+	0,
+	16,
+	128,
+	17,
+	0,
+	17,
+	128,
+	18,
+	0,
+	18,
+	128,
+	19,
+	0,
+	19,
+	128,
+	20,
+	0,
+	20,
+	128,
+	21,
+	0,
+	21,
+	128,
+	22,
+	0,
+	22,
+	128,
+	23,
+	0,
+	23,
+	128,
+	24,
+	0,
+	24,
+	128,
+	25,
+	0,
+	25,
+	128,
+	26,
+	0,
+	26,
+	128,
+	27,
+	0,
+	27,
+	128,
+	28,
+	0,
+	28,
+	128,
+	29,
+	0,
+	29,
+	128,
+	30,
+	0,
+	30,
+	128,
+	31,
+	0,
+	31,
+	128,
+	32,
+	0,
+	32,
+	128,
+	33,
+	0,
+	33,
+	128,
+	34,
+	0,
+	34,
+	128,
+	35,
+	0,
+	35,
+	128,
+	36,
+	0,
+	36,
+	128,
+	37,
+	0,
+	37,
+	128,
+	38,
+	0,
+	38,
+	128,
+	39,
+	0,
+	39,
+	128,
+	40,
+	0,
+	40,
+	128,
+	41,
+	0,
+	41,
+	128,
+	42,
+	0,
+	42,
+	128,
+	43,
+	0,
+	43,
+	128,
+	44,
+	0,
+	44,
+	128,
+	45,
+	0,
+	45,
+	128,
+	46,
+	0,
+	46,
+	128,
+	47,
+	0,
+	47,
+	128,
+	48,
+	0,
+	48,
+	128,
+	49,
+	0,
+	49,
+	128,
+	50,
+	0,
+	50,
+	128,
+	51,
+	0,
+	51,
+	128,
+	52,
+	0,
+	52,
+	128,
+	53,
+	0,
+	53,
+	128,
+	54,
+	0,
+	54,
+	128,
+	55,
+	0,
+	55,
+	128,
+	56,
+	0,
+	56,
+	128,
+	57,
+	0,
+	57,
+	128,
+	58,
+	0,
+	58,
+	128,
+	59,
+	0,
+	59,
+	128,
+	60,
+	0,
+	60,
+	128,
+	61,
+	0,
+	61,
+	128,
+	62,
+	0,
+	62,
+	128,
+	63,
+	0,
+	63,
+	128,
+	64,
+	0,
+	64,
+	127,
+	64,
+	255,
+	65,
+	127,
+	65,
+	255,
+	66,
+	127,
+	66,
+	255,
+	67,
+	127,
+	67,
+	255,
+	68,
+	127,
+	68,
+	255,
+	69,
+	127,
+	69,
+	255,
+	70,
+	127,
+	70,
+	255,
+	71,
+	127,
+	71,
+	255,
+	72,
+	127,
+	72,
+	255,
+	73,
+	127,
+	73,
+	255,
+	74,
+	127,
+	74,
+	255,
+	75,
+	127,
+	75,
+	255,
+	76,
+	127,
+	76,
+	255,
+	77,
+	127,
+	77,
+	255,
+	78,
+	127,
+	78,
+	255,
+	79,
+	127,
+	79,
+	255,
+	80,
+	127,
+	80,
+	255,
+	81,
+	127,
+	81,
+	255,
+	82,
+	127,
+	82,
+	255,
+	83,
+	127,
+	83,
+	255,
+	84,
+	127,
+	84,
+	255,
+	85,
+	127,
+	85,
+	255,
+	86,
+	127,
+	86,
+	255,
+	87,
+	127,
+	87,
+	255,
+	88,
+	127,
+	88,
+	255,
+	89,
+	127,
+	89,
+	255,
+	90,
+	127,
+	90,
+	255,
+	91,
+	127,
+	91,
+	255,
+	92,
+	127,
+	92,
+	255,
+	93,
+	127,
+	93,
+	255,
+	94,
+	127,
+	94,
+	255,
+	95,
+	127,
+	95,
+	255,
+	96,
+	127,
+	96,
+	255,
+	97,
+	127,
+	97,
+	255,
+	98,
+	127,
+	98,
+	255,
+	99,
+	127,
+	99,
+	255,
+	100,
+	127,
+	100,
+	255,
+	101,
+	127,
+	101,
+	255,
+	102,
+	127,
+	102,
+	255,
+	103,
+	127,
+	103,
+	255,
+	104,
+	127,
+	104,
+	255,
+	105,
+	127,
+	105,
+	255,
+	106,
+	127,
+	106,
+	255,
+	107,
+	127,
+	107,
+	255,
+	108,
+	127,
+	108,
+	255,
+	109,
+	127,
+	109,
+	255,
+	110,
+	127,
+	110,
+	255,
+	111,
+	127,
+	111,
+	255,
+	112,
+	127,
+	112,
+	255,
+	113,
+	127,
+	113,
+	255,
+	114,
+	127,
+	114,
+	255,
+	115,
+	127,
+	115,
+	255,
+	116,
+	127,
+	116,
+	255,
+	117,
+	127,
+	117,
+	255,
+	118,
+	127,
+	118,
+	255,
+	119,
+	127,
+	119,
+	255,
+	120,
+	127,
+	120,
+	255,
+	121,
+	127,
+	121,
+	255,
+	122,
+	127,
+	122,
+	255,
+	123,
+	127,
+	123,
+	255,
+	124,
+	127,
+	124,
+	255,
+	125,
+	127,
+	125,
+	255,
+	126,
+	127,
+	126,
+	255,
+	127,
+	127,
+	127,
+	255,
+	0,
+	0,
+	0,
+	0
+]);
+//#endregion
+//#region src/deserialize.ts
+const textDecoder = new TextDecoder();
+const BASE_LENGTH$1 = base.length;
+const TONE_CURVE_EXTENSION_LENGTH = baseWithToneCurve.length - BASE_LENGTH$1;
+const COMMENT_LENGTH_OFFSET = BASE_LENGTH$1;
+const COMMENT_PAYLOAD_OFFSET = COMMENT_LENGTH_OFFSET + 4;
+const CHUNK_TYPE_LENGTH = 4;
+const TONE_CURVE_CHUNK_TYPE = 2;
+/**
+* Parse "flexible color picture control" binary
+* @param buf NP3 binary
+* @returns flexible color picture control options
+* @example
+* ```ts
+* const buf = Deno.readFileSync("test.NP3");
+* const options = deserialize(buf);
+* console.log(options); // { name: "test", sharpning: 2, ... }
+* ```
+*/
+function deserialize(buf) {
+	return {
+		name: readName(buf),
+		sharpning: readSharpning(buf),
+		midRangeSharpning: readMidRangeSharpning(buf),
+		clarity: readClarity(buf),
+		contrast: readContrast(buf),
+		highlights: readHighlights(buf),
+		shadows: readShadows(buf),
+		whiteLevel: readWhiteLevel(buf),
+		blackLevel: readBlackLevel(buf),
+		saturation: readSaturation(buf),
+		colorBlender: readColorBlender(buf),
+		colorGrading: readColorGrading(buf),
+		toneCurve: readToneCurve(buf),
+		comment: readComment(buf)
+	};
+}
+/** Get the name of the picture control */
+function readName(buf) {
+	return String.fromCharCode(...buf.slice(24, 43)).split("\0", 1)[0];
+}
+/** Get the sharpning of the picture control */
+function readSharpning(buf) {
+	return (buf[82] - 128) / 4;
+}
+/** Get the mid-range sharpning of the picture control */
+function readMidRangeSharpning(buf) {
+	return (buf[242] - 128) / 4;
+}
+/** Get the clarity of the picture control */
+function readClarity(buf) {
+	return (buf[92] - 128) / 4;
+}
+/** Get the contrast of the picture control */
+function readContrast(buf) {
+	if (hasToneCurve(buf)) return 0;
+	return buf[272] - 128;
+}
+/** Get the highlights of the picture control */
+function readHighlights(buf) {
+	if (hasToneCurve(buf)) return 0;
+	return buf[282] - 128;
+}
+/** Get the shadows of the picture control */
+function readShadows(buf) {
+	if (hasToneCurve(buf)) return 0;
+	return buf[292] - 128;
+}
+/** Get the white level of the picture control */
+function readWhiteLevel(buf) {
+	if (hasToneCurve(buf)) return 0;
+	return buf[302] - 128;
+}
+/** Get the black level of the picture control */
+function readBlackLevel(buf) {
+	if (hasToneCurve(buf)) return 0;
+	return buf[312] - 128;
+}
+/** Get the saturation of the picture control */
+function readSaturation(buf) {
+	return buf[322] - 128;
+}
+/** Get the color blender of the picture control */
+function readColorBlender(buf) {
+	return {
+		red: readColorBlenderValues(buf, 332),
+		orange: readColorBlenderValues(buf, 335),
+		yellow: readColorBlenderValues(buf, 338),
+		green: readColorBlenderValues(buf, 341),
+		cyan: readColorBlenderValues(buf, 344),
+		blue: readColorBlenderValues(buf, 347),
+		purple: readColorBlenderValues(buf, 350),
+		magenta: readColorBlenderValues(buf, 353)
+	};
+}
+function readColorBlenderValues(buf, offset) {
+	return {
+		hue: buf[offset] - 128,
+		chroma: buf[offset + 1] - 128,
+		brightness: buf[offset + 2] - 128
+	};
+}
+/** Get the color grading of the picture control */
+function readColorGrading(buf) {
+	return {
+		highlights: readColorGradingValues(buf, 368),
+		midTone: readColorGradingValues(buf, 372),
+		shadows: readColorGradingValues(buf, 376),
+		blending: buf[384] - 128,
+		balance: buf[386] - 128
+	};
+}
+function readColorGradingValues(buf, offset) {
+	return {
+		hue: ((buf[offset] & 15) << 8) + buf[offset + 1],
+		chroma: buf[offset + 2] - 128,
+		brightness: buf[offset + 3] - 128
+	};
+}
+/** Get the comment of the picture control */
+function readComment(buf) {
+	const chunk = readCommentChunk(buf);
+	if (chunk === void 0) return void 0;
+	const payload = buf.slice(COMMENT_PAYLOAD_OFFSET, COMMENT_PAYLOAD_OFFSET + chunk.payloadLength);
+	const terminator = payload.indexOf(0);
+	return decodeUtf8String(payload.slice(0, terminator === -1 ? payload.length : terminator));
+}
+/** Get the tone curve of the picture control */
+function readToneCurve(buf) {
+	const toneCurveStart = getToneCurveStart$1(buf);
+	if (toneCurveStart === void 0) return void 0;
+	return {
+		raw: readToneCurveRaw(buf, toneCurveStart),
+		points: readToneCurvePoints(buf, toneCurveStart)
+	};
+}
+function readToneCurveRaw(buf, toneCurveStart) {
+	const offsetDelta = toneCurveStart - BASE_LENGTH$1;
+	const u16arr = readAsBigEndianU16(buf.slice(460 + offsetDelta, 460 + offsetDelta + 257 * 2));
+	return Array.from(u16arr);
+}
+function readToneCurvePoints(buf, toneCurveStart) {
+	const offsetDelta = toneCurveStart - BASE_LENGTH$1;
+	const pointCount = buf[404 + offsetDelta];
+	if (pointCount === 0) return [];
+	const points = [];
+	for (let i = 0; i < pointCount; i++) {
+		const offset = 404 + offsetDelta + 1 + i * 2;
+		points.push({
+			x: buf[offset],
+			y: buf[offset + 1]
+		});
+	}
+	return points;
+}
+function hasCommentFlag(buf) {
+	return buf[389] === 1 && buf[390] === 1;
+}
+function hasToneCurve(buf) {
+	return getToneCurveStart$1(buf) !== void 0;
+}
+function readCommentChunk(buf) {
+	if (!hasCommentFlag(buf) || buf.byteLength < COMMENT_PAYLOAD_OFFSET + CHUNK_TYPE_LENGTH) return;
+	const payloadLength = readUint32BE(buf, COMMENT_LENGTH_OFFSET);
+	if (payloadLength === 0 || payloadLength % 2 !== 0) return void 0;
+	const payloadEnd = COMMENT_PAYLOAD_OFFSET + payloadLength;
+	const nextChunkTypeOffset = payloadEnd;
+	if (nextChunkTypeOffset + CHUNK_TYPE_LENGTH > buf.byteLength) return;
+	const payload = buf.slice(COMMENT_PAYLOAD_OFFSET, payloadEnd);
+	const terminator = payload.indexOf(0);
+	if (terminator === -1) return void 0;
+	if (!isZeroFilled(payload, terminator, payload.length - terminator)) return;
+	return {
+		payloadLength,
+		nextChunkType: readUint32BE(buf, nextChunkTypeOffset)
+	};
+}
+function getToneCurveStart$1(buf) {
+	const commentChunk = readCommentChunk(buf);
+	if (commentChunk !== void 0) {
+		if (commentChunk.nextChunkType !== TONE_CURVE_CHUNK_TYPE) return void 0;
+		const toneCurveStart = COMMENT_PAYLOAD_OFFSET + commentChunk.payloadLength + CHUNK_TYPE_LENGTH;
+		return buf.byteLength >= toneCurveStart + TONE_CURVE_EXTENSION_LENGTH ? toneCurveStart : void 0;
+	}
+	if (buf.byteLength < BASE_LENGTH$1 + TONE_CURVE_EXTENSION_LENGTH) return;
+	return buf[391] === 2 ? BASE_LENGTH$1 : void 0;
+}
+function isZeroFilled(buf, start, length) {
+	for (let i = 0; i < length; i++) if (buf[start + i] !== 0) return false;
+	return true;
+}
+function readUint32BE(buf, offset) {
+	return new DataView(buf.buffer, buf.byteOffset, buf.byteLength).getUint32(offset, false);
+}
+function decodeUtf8String(buf) {
+	return textDecoder.decode(buf);
+}
+function readAsBigEndianU16(buf) {
+	const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+	const u16arr = new Uint16Array(buf.byteLength / 2);
+	for (let i = 0; i < u16arr.length; i++) u16arr[i] = view.getUint16(i * 2, false);
+	return u16arr;
+}
+//#endregion
+//#region src/serialize.ts
+const textEncoder = new TextEncoder();
+const BASE_LENGTH = base.length;
+const TONE_CURVE_EXTENSION = baseWithToneCurve.slice(BASE_LENGTH);
+const MAX_COMMENT_CODE_UNITS = 256;
+const TONE_CURVE_SENTINEL_OFFSETS = [
+	272,
+	282,
+	292,
+	302,
+	312
+];
+/**
+* Create "flexible color picture control" binary
+* @param options
+* @returns NP3 binary
+* @example
+* ```ts
+* const buf = serialize({ name: "test", sharpning: 2 });
+* // Deno
+* Deno.writeFileSync("test.NP3", buf);
+* // Node.js/Bun
+* fs.writeFileSync("test.NP3", buf);
+* // Browser
+* URL.createObjectURL(new Blob([buf], { type: "application/octet-stream" }));
+* ```
+*/
+function serialize({ name, comment, sharpning, midRangeSharpning, clarity, contrast, highlights, shadows, whiteLevel, blackLevel, saturation, colorBlender, colorGrading, toneCurve }) {
+	let ret = new Uint8Array(base);
+	writeName(ret, name);
+	writeSharpning(ret, sharpning);
+	writeMidRangeSharpning(ret, midRangeSharpning);
+	writeClarity(ret, clarity);
+	writeContrast(ret, contrast);
+	writeHighlights(ret, highlights);
+	writeShadows(ret, shadows);
+	writeWhiteLevel(ret, whiteLevel);
+	writeBlackLevel(ret, blackLevel);
+	writeSaturation(ret, saturation);
+	writeColorBlender(ret, colorBlender);
+	writeColorGrading(ret, colorGrading);
+	ret = writeComment(ret, comment, toneCurve ? 2 : 0);
+	if (!toneCurve) return ret;
+	ret = appendToneCurveExtension(ret);
+	applyToneCurveHeader(ret, comment === void 0 || comment.length === 0);
+	return writeToneCurve(ret, toneCurve);
+}
+/** Set the name of the picture control */
+function writeName(buf, name) {
+	if (name.length > 19) throw new Error("name must be less than 19 characters");
+	for (let i = 0; i < name.length; i++) buf[24 + i] = name.charCodeAt(i);
+}
+/** Set the sharpning of the picture control */
+function writeSharpning(buf, sharpning = 2) {
+	buf[82] = 128 + clamp(sharpning, -3, 9) * 4;
+}
+/** Set the mid-range sharpning of the picture control */
+function writeMidRangeSharpning(buf, midRangeSharpning = 1) {
+	buf[242] = 128 + clamp(midRangeSharpning, -5, 5) * 4;
+}
+/** Set the clarity of the picture control */
+function writeClarity(buf, clarity = .5) {
+	buf[92] = 128 + clamp(clarity, -5, 5) * 4;
+}
+/** Set the contrast of the picture control */
+function writeContrast(buf, contrast = 0) {
+	buf[272] = 128 + clamp(contrast, -100, 100);
+}
+/** Set the highlights of the picture control */
+function writeHighlights(buf, highlights = 0) {
+	buf[282] = 128 + clamp(highlights, -100, 100);
+}
+/** Set the shadows of the picture control */
+function writeShadows(buf, shadows = 0) {
+	buf[292] = 128 + clamp(shadows, -100, 100);
+}
+/** Set the white level of the picture control */
+function writeWhiteLevel(buf, whiteLevel = 0) {
+	buf[302] = 128 + clamp(whiteLevel, -100, 100);
+}
+/** Set the black level of the picture control */
+function writeBlackLevel(buf, blackLevel = 0) {
+	buf[312] = 128 + clamp(blackLevel, -100, 100);
+}
+/** Set the saturation of the picture control */
+function writeSaturation(buf, saturation = 0) {
+	buf[322] = 128 + clamp(saturation, -100, 100);
+}
+/** Set the color blender of the picture control */
+function writeColorBlender(buf, colorBlender = {}) {
+	writeColorBlenderValues(buf, 332, colorBlender.red);
+	writeColorBlenderValues(buf, 335, colorBlender.orange);
+	writeColorBlenderValues(buf, 338, colorBlender.yellow);
+	writeColorBlenderValues(buf, 341, colorBlender.green);
+	writeColorBlenderValues(buf, 344, colorBlender.cyan);
+	writeColorBlenderValues(buf, 347, colorBlender.blue);
+	writeColorBlenderValues(buf, 350, colorBlender.purple);
+	writeColorBlenderValues(buf, 353, colorBlender.magenta);
+}
+function writeColorBlenderValues(buf, offset, color = {}) {
+	const { hue = 0, chroma = 0, brightness = 0 } = color;
+	buf[offset] = 128 + clamp(hue, -100, 100);
+	buf[offset + 1] = 128 + clamp(chroma, -100, 100);
+	buf[offset + 2] = 128 + clamp(brightness, -100, 100);
+}
+/** Set the color grading of the picture control */
+function writeColorGrading(buf, colorGrading = {}) {
+	writeColorGradingValues(buf, 368, colorGrading.highlights);
+	writeColorGradingValues(buf, 372, colorGrading.midTone);
+	writeColorGradingValues(buf, 376, colorGrading.shadows);
+	const { blending = 50, balance = 0 } = colorGrading;
+	buf[384] = 128 + clamp(blending, -100, 100);
+	buf[386] = 128 + clamp(balance, -100, 100);
+}
+function writeColorGradingValues(buf, offset, color = {}) {
+	const { hue = 0, chroma = 0, brightness = 0 } = color;
+	const normHue = roundDegree(hue);
+	buf[offset] = 128 + (normHue >> 8);
+	buf[offset + 1] = normHue & 255;
+	buf[offset + 2] = 128 + clamp(chroma, -100, 100);
+	buf[offset + 3] = 128 + clamp(brightness, -100, 100);
+}
+/** Set the comment of the picture control */
+function writeComment(buf, comment = "", nextChunkType = 0) {
+	if (comment.length === 0) return buf;
+	const payload = encodeComment(comment);
+	const ret = new Uint8Array(buf.byteLength + 4 + payload.byteLength + 4);
+	ret.set(buf);
+	ret[389] = 1;
+	ret[390] = 1;
+	new DataView(ret.buffer).setUint32(buf.byteLength, payload.byteLength, false);
+	ret.set(payload, buf.byteLength + 4);
+	new DataView(ret.buffer).setUint32(buf.byteLength + 4 + payload.byteLength, nextChunkType, false);
+	return ret;
+}
+function writeToneCurve(buf, toneCurve = {
+	raw: [],
+	points: []
+}) {
+	const toneCurveStart = getToneCurveStart(buf);
+	writeToneCurveRaw(buf, toneCurve.raw, toneCurveStart);
+	writeToneCurvePoints(buf, toneCurve.points, toneCurveStart);
+	return buf;
+}
+function writeToneCurveRaw(buf, raw, toneCurveStart) {
+	const view = new DataView(buf.buffer);
+	const offsetDelta = toneCurveStart - BASE_LENGTH;
+	for (let i = 0; i < raw.length; i++) {
+		const value = clamp(raw[i] ?? 0, 0, 32767);
+		view.setUint16(460 + offsetDelta + i * 2, value, false);
+	}
+}
+function writeToneCurvePoints(buf, points, toneCurveStart) {
+	const pointCount = Math.min(points.length, 20);
+	const offsetDelta = toneCurveStart - BASE_LENGTH;
+	buf[404 + offsetDelta] = pointCount;
+	for (let i = 0; i < pointCount; i++) {
+		const point = points[i];
+		const offset = 404 + offsetDelta + 1 + i * 2;
+		buf[offset] = clamp(point.x, 0, 255);
+		buf[offset + 1] = clamp(point.y, 0, 255);
+	}
+}
+function appendToneCurveExtension(buf) {
+	const ret = new Uint8Array(buf.byteLength + TONE_CURVE_EXTENSION.length);
+	ret.set(buf);
+	ret.set(TONE_CURVE_EXTENSION, buf.byteLength);
+	return ret;
+}
+function applyToneCurveHeader(buf, hasNoComment) {
+	for (const offset of TONE_CURVE_SENTINEL_OFFSETS) buf[offset] = 1;
+	if (hasNoComment) buf[391] = 2;
+}
+function getToneCurveStart(buf) {
+	const commentPayloadLength = readCommentPayloadLength(buf);
+	return commentPayloadLength === void 0 ? BASE_LENGTH : BASE_LENGTH + 4 + commentPayloadLength + 4;
+}
+function readCommentPayloadLength(buf) {
+	if (buf[389] !== 1 || buf[390] !== 1) return;
+	if (buf.byteLength < BASE_LENGTH + 8) return void 0;
+	const payloadLength = new DataView(buf.buffer, buf.byteOffset, buf.byteLength).getUint32(BASE_LENGTH, false);
+	if (payloadLength === 0 || payloadLength % 2 !== 0) return void 0;
+	return payloadLength;
+}
+function clamp(value, min, max) {
+	return Math.min(max, Math.max(min, value));
+}
+function roundDegree(value) {
+	return (value % 360 + 360) % 360;
+}
+function encodeComment(comment) {
+	if (comment.includes("\0")) throw new Error("comment must not contain NUL characters");
+	const encoded = textEncoder.encode(trimComment(comment));
+	const ret = new Uint8Array(alignToEven(encoded.byteLength + 1));
+	ret.set(encoded);
+	return ret;
+}
+function trimComment(comment) {
+	if (comment.length <= MAX_COMMENT_CODE_UNITS) return comment;
+	let trimmed = comment.slice(0, MAX_COMMENT_CODE_UNITS);
+	const lastCodeUnit = trimmed.charCodeAt(trimmed.length - 1);
+	if (lastCodeUnit >= 55296 && lastCodeUnit <= 56319) trimmed = trimmed.slice(0, -1);
+	return trimmed;
+}
+function alignToEven(value) {
+	return value % 2 === 0 ? value : value + 1;
+}
+//#endregion
+
+/* NCP 解析器 —— 基于公开逆向资料实现（tvgenious89/nikon-pc 的 core.js 描述）
+   容器：'NCP\0' + 若干 [4字节大端 recordID][4字节大端 length][payload]，recordID=0 结束 */
+
+
+const SIG = [0x4e, 0x43, 0x50, 0x00]; // "NCP\0"
+
+function rdU32BE(b, o) {
+  return ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0;
+}
+function rdU16BE(b, o) {
+  return (b[o] << 8) | b[o + 1];
+}
+function cstr(b, o, len) {
+  let s = "";
+  for (let i = 0; i < len && o + i < b.length; i++) {
+    const c = b[o + i];
+    if (c === 0) break;
+    s += String.fromCharCode(c);
+  }
+  return s.trim();
+}
+
+/* 基准优化校准枚举 —— 只保留有依据的值，没验证过的宁可显示「未知」 */
+const BASE_CN = {
+  0x0001: "标准",
+  0x03c2: "中性",
+  0x00c3: "鲜艳",
+  0x0486: "人像",
+  0x04c7: "风景",
+  0x064d: "单色",
+};
+const BASE_EN = {
+  0x0001: "Standard", 0x03c2: "Neutral", 0x00c3: "Vivid",
+  0x0486: "Portrait", 0x04c7: "Landscape", 0x064d: "Monochrome",
+};
+
+/* 容器签名：所有实测到的 NCP 与 NP3 文件都以 'NCP\0' 开头 */
+function hasSig(buf) {
+  if (!buf || buf.length < 12) return false;
+  for (let i = 0; i < 4; i++) if (buf[i] !== SIG[i]) return false;
+  return true;
+}
+
+/* NCP 与 NP3 共用容器，靠首个记录区分：
+   NCP 是定长记录（id=1、长度 36）；NP3 是带 tag 的记录（id=0x00000100）。
+   实测样本：Horshack_Linear.NCP / demo-soft.NCP → id=1 len=36；
+             ClrMode_Bu_01a.NP3 / demo-*.NP3   → id=0x100 len=4。
+   注意：NP3 解析库对任意缓冲区都不抛错（越界读出 NaN 与乱码），
+   所以必须在这里靠结构与数值范围把关，不能指望它自己失败。 */
+function isNcp(buf) {
+  if (!hasSig(buf)) return false;
+  return rdU32BE(buf, 4) === 1;
+}
+
+function isNp3(buf) {
+  if (!hasSig(buf)) return false;
+  return rdU32BE(buf, 4) === 0x100;
+}
+
+/* NP3 的名称字段是 19 字节 ASCII（解析库取 buf[24..42]）。
+   拿它当最后一道闸门：垃圾文件在这里必然露馅。 */
+const NAME_OK = /^[\x20-\x7e]*$/;
+
+/* 统一入口：认出格式并解析成同一个对象，附带 format 与 fileName */
+function parseAny(buf, fileName) {
+  if (!buf || buf.length < 12) throw new Error("文件太短，不像优化校准文件");
+  if (!hasSig(buf)) {
+    // NP2 有自己的签名，认得出来就明说，别笼统报「签名不符」
+    const s4 = String.fromCharCode(buf[0], buf[1], buf[2], buf[3]);
+    if (s4 === "NP2\x00") throw new Error("这是 NP2 文件（签名已识别），但解析尚未支持");
+    throw new Error("签名不符：不是尼康优化校准文件");
+  }
+
+  const id = rdU32BE(buf, 4);
+  let pc;
+  if (id === 1) {
+    if (rdU32BE(buf, 8) < 36) throw new Error("NCP 记录 1 长度异常");
+    pc = parseNcp(buf);
+  } else if (id === 0x100) {
+    pc = deserialize(buf);
+    if (!pc || typeof pc.name !== "string") throw new Error("NP3 解析失败");
+    // 名称允许为空（界面有「(未命名)」兜底），但不允许可打印 ASCII 以外的字节
+    if (!NAME_OK.test(pc.name)) {
+      throw new Error("NP3 名称字段含非法字节，文件可能已损坏或并非 NP3");
+    }
+    pc.format = "np3";
+  } else {
+    throw new Error(`不认识的记录类型 0x${id.toString(16)}（仅支持 NCP 与 NP3）`);
+  }
+
+  pc.fileName = fileName || "";
+  return pc;
+}
+
+function parseNcp(buf) {
+  if (buf.length < 8) throw new Error("文件太短");
+  for (let i = 0; i < 4; i++) {
+    if (buf[i] !== SIG[i]) throw new Error("不是 NCP/NP3 文件（签名不符）");
+  }
+
+  let off = 4;
+  let settings = null;
+  let curve = null;
+  const records = [];
+
+  while (off + 8 <= buf.length) {
+    const id = rdU32BE(buf, off);
+    const len = rdU32BE(buf, off + 4);
+    off += 8;
+    if (id === 0) break;
+    if (len > buf.length - off) break;
+    records.push({ id, len });
+    if (id === 1 && len >= 36) settings = parseSettings(buf, off);
+    if (id === 2 && len >= 578) curve = parseCurve(buf, off, len);
+    off += len;
+    if (records.length > 64) break;
+  }
+
+  if (!settings) throw new Error("没找到设置记录（record 1）");
+  return { ...settings, toneCurve: curve, records };
+}
+
+function parseSettings(b, o) {
+  // [0..3] 是 ASCII 版本串（样本为 "0100"）
+  const version = cstr(b, o, 4);
+  const name = cstr(b, o + 4, 20);
+  const baseEnum = rdU16BE(b, o + 24);
+
+  // 0xFF 表示该调节项被停用（不适用），否则以 128 为中性
+  const raw = (i) => (b[o + i] === 0xff ? null : b[o + i]);
+  const isMono = raw(31) === null;
+
+  return {
+    format: "ncp",
+    version,
+    name,
+    base: BASE_CN[baseEnum] || BASE_EN[baseEnum] || ("未知 (0x" + baseEnum.toString(16) + ")"),
+    baseEnum,
+    isMono,
+    sharpning: raw(28),
+    // 实测：offset 29/30 不是对比度/亮度数值，而是标志
+    //（样本值为 1，且该文件带自定义曲线）。按标志处理，不当作调节量显示。
+    contrastFlag: b[o + 29],
+    brightnessFlag: b[o + 30],
+    saturation: raw(31),
+    hue: raw(32),
+    monoFilter: b[o + 33],
+    toningType: b[o + 34],
+    toningAmount: b[o + 35],
+  };
+}
+
+function parseCurve(b, o, len) {
+  const curveType = b[o];
+  // [2..5] = minIn, maxIn, minOut, maxOut
+  const minIn = b[o + 2], maxIn = b[o + 3];
+  const minOut = b[o + 4], maxOut = b[o + 5];
+  const gammaInt = b[o + 6];
+  const gammaFrac = b[o + 7];
+  const ptCount = b[o + 8];
+  const end = o + Math.max(0, len);
+
+  // 控制点：从 offset 9 起，[input, output] 各 1 字节
+  const points = [];
+  const n = Math.min(ptCount, 20);
+  for (let i = 0; i < n; i++) {
+    const px = o + 9 + i * 2;
+    if (px + 1 >= end || px + 1 >= b.length) break;
+    points.push({ x: b[px], y: b[px + 1] });
+  }
+
+  // 查找表：offset 66 起，256 项大端 uint16，刻度 0~32767。
+  // 依据：记录声明长度 578 = 66 字节头 + 256×2，Horshack_Linear.NCP 与自建样本都严丝合缝。
+  const lut = new Uint8ClampedArray(256);
+  const lutBase = o + 66;
+  const span = (maxOut - minOut) || 255;
+  const count = Math.min(256, Math.floor((end - lutBase) / 2));
+  for (let i = 0; i < count; i++) {
+    lut[i] = rdU16BE(b, lutBase + i * 2) / 32767 * span + minOut;
+  }
+
+  return {
+    curveType,
+    gamma: gammaInt + gammaFrac / 100,
+    range: { minIn, maxIn, minOut, maxOut },
+    points,
+    lut,
+  };
+}</script>
+<script>/* 尼康优化校准查看器 —— 应用层 */
+
+const $ = (s) => document.querySelector(s);
+
+const state = {
+  pc: null,        // 解析出的 PictureControl
+  lut: null,       // 256 项查找表，Uint8ClampedArray，索引=输入，值=输出
+  img: null,       // 原图 ImageData
+  split: 0.5,
+};
+
+/* ---------- 曲线：统一成 256 项查找表 ---------- */
+
+function buildLut(pc) {
+  const tc = pc?.toneCurve;
+  if (!tc) return null;
+
+  // NCP：解析器已给出 0~255 的 256 项 LUT
+  if (tc.lut && tc.lut.length === 256) return tc.lut;
+
+  // NP3：raw 是 257 个 0~32767 的采样，折成 256 项
+  const raw = tc.raw;
+  if (!raw || raw.length < 2) return null;
+  const lut = new Uint8ClampedArray(256);
+  for (let i = 0; i < 256; i++) {
+    const t = (i / 255) * (raw.length - 1);
+    const i0 = Math.floor(t);
+    const i1 = Math.min(i0 + 1, raw.length - 1);
+    const f = t - i0;
+    const v = raw[i0] * (1 - f) + raw[i1] * f;
+    lut[i] = (v / 32767) * 255;
+  }
+  return lut;
+}
+
+/* ---------- 曲线绘制 ---------- */
+
+const CV = { PAD: 34 };
+const AXIS_FONT = '11px "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei UI", sans-serif';
+const HINT_FONT = '13px "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei UI", sans-serif';
+
+/* 绘图区边界，供悬停读数复用（随尺寸变化重算） */
+let plot = null;
+
+/* 真正的控制点：两种格式都存在 toneCurve.points，刻度都是 0~255 */
+function ctrlPoints(pc) {
+  const pts = pc?.toneCurve?.points || [];
+  return pts.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+}
+
+function drawCurve() {
+  const cv = $("#curve");
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;                      // 卡片还藏着，等 ResizeObserver 再画
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+
+  const L = CV.PAD, R = w - 10, T = 10, B = h - L;
+  plot = { L, R, T, B };
+  const X = (v) => L + (v / 100) * (R - L);      // v: 0~100
+  const Y = (v) => B - (v / 100) * (B - T);
+
+  // 网格 + 刻度（用尼康实际的 0–100 刻度）
+  g.strokeStyle = "#242830"; g.lineWidth = 1;
+  g.fillStyle = "#6b7280"; g.font = AXIS_FONT;
+  for (let v = 0; v <= 100; v += 25) {
+    g.beginPath(); g.moveTo(X(v), T); g.lineTo(X(v), B); g.stroke();
+    g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(R, Y(v)); g.stroke();
+  }
+  g.textAlign = "center";
+  for (let v = 0; v <= 100; v += 25) g.fillText(v, X(v), B + 15);
+  g.textAlign = "right";
+  for (let v = 0; v <= 100; v += 25) g.fillText(v, L - 6, Y(v) + 4);
+
+  // 45° 恒等参考线
+  g.strokeStyle = "#3a3f4a"; g.setLineDash([4, 4]);
+  g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(100), Y(100)); g.stroke();
+  g.setLineDash([]);
+
+  const hideReadout = () => { $("#readout").style.display = "none"; };
+
+  if (!state.lut) {
+    hideReadout();
+    g.fillStyle = "#8b929e"; g.textAlign = "center";
+    g.font = HINT_FONT;
+    g.fillText("此配置没有自定义色调曲线（使用恒等曲线）", (L + R) / 2, (T + B) / 2);
+    return;
+  }
+
+  // lut 的值域是 0~255，而坐标函数期望 0~100，必须统一换算
+  const P = (i) => [(i / 255) * 100, (state.lut[i] / 255) * 100];
+
+  g.save();
+  g.beginPath();
+  g.rect(L, T, R - L, B - T);
+  g.clip();
+
+  // 曲线下方的区域填充，突出「压暗/提亮」的形状
+  g.beginPath();
+  g.moveTo(X(0), Y(P(0)[1]));
+  for (let i = 1; i < 256; i++) { const [px, py] = P(i); g.lineTo(X(px), Y(py)); }
+  g.lineTo(X(100), B); g.lineTo(X(0), B); g.closePath();
+  g.fillStyle = "rgba(90,169,255,.08)";
+  g.fill();
+
+  // 曲线本体
+  g.beginPath();
+  g.moveTo(X(0), Y(P(0)[1]));
+  for (let i = 1; i < 256; i++) { const [px, py] = P(i); g.lineTo(X(px), Y(py)); }
+  g.strokeStyle = "#5aa9ff"; g.lineWidth = 2; g.stroke();
+
+  // 控制点：取自文件里的 points，而不是按固定步长从曲线上采样
+  const pts = ctrlPoints(state.pc);
+  if (pts.length) {
+    g.fillStyle = "#ffd479"; g.strokeStyle = "#14161a"; g.lineWidth = 1.5;
+    for (const { x, y } of pts) {
+      g.beginPath(); g.arc(X((x / 255) * 100), Y((y / 255) * 100), 3.5, 0, Math.PI * 2);
+      g.fill(); g.stroke();
+    }
+  }
+  g.restore();
+}
+
+/* 悬停读数只绑定一次，重绘时不重复挂监听，也不会留下上一条的数值 */
+function wireCurveHover() {
+  const cv = $("#curve"), el = $("#readout");
+  cv.addEventListener("pointermove", (e) => {
+    const r = cv.getBoundingClientRect();
+    const px = e.clientX - r.left;
+    if (!plot || !state.lut || px < plot.L || px > plot.R) { el.style.display = "none"; return; }
+    const v = ((px - plot.L) / (plot.R - plot.L)) * 100;
+    const idx = Math.min(255, Math.max(0, Math.round((v / 100) * 255)));
+    el.textContent = `输入 ${v.toFixed(1)} → 输出 ${((state.lut[idx] / 255) * 100).toFixed(1)}`;
+    el.style.display = "block";
+  });
+  cv.addEventListener("pointerleave", () => { el.style.display = "none"; });
+}
+
+/* ---------- 参数面板 ---------- */
+
+const BLENDER_CN = {
+  red: "红", orange: "橙", yellow: "黄", green: "绿",
+  cyan: "青", blue: "蓝", purple: "紫", magenta: "洋红",
+};
+const GRADING_CN = { highlights: "高光", midTone: "中调", shadows: "阴影" };
+
+function fmt(v, d = 0) {
+  if (v === undefined || v === null) return "—";
+  if (typeof v === "string") return v;
+  return d ? v.toFixed(d) : String(Math.round(v * 10) / 10);
+}
+
+/* pairs 的第三项为真时，值为 0 也按「结构性为 0」压暗：
+   有自定义曲线时对比度等五项必定是 0，与真正调出来的 0 不是一回事。 */
+function rows(pairs) {
+  return pairs.map(([k, v, dimZero]) => {
+    const cls = v === undefined || v === null || (dimZero && v === 0) ? "na" : "";
+    return `<tr><th>${k}</th><td class="v ${cls}">${fmt(v)}</td></tr>`;
+  }).join("");
+}
+
+/* 一个色系/分段是否真有调整：值恒为对象，直接判真假会把全 0 也当成有值 */
+const touched = (v) => !!v && (v.hue || v.chroma || v.brightness);
+
+/* ---------- 色块示意 ----------
+   只画语义明确的部分：艳度→饱和度、明度→亮度。
+   色彩混合的色相是 ±100 偏移量且方向未公开，只标数值；
+   色彩分级的色相是 0~360 绝对值，可以直接画出来。
+   FAM_HUE（色系名义色相表）定义在 colorsim.js，同一 script 标签内共用。 */
+const clamp100 = (v) => Math.max(0, Math.min(100, v));
+const sgn = (v) => (v > 0 ? "+" : "") + Math.round(v);
+
+function blenderSwatch(cn, hue, v) {
+  const sat = clamp100(62 * (1 + (v.chroma || 0) / 100));
+  const lig = Math.max(8, Math.min(92, 50 * (1 + (v.brightness || 0) / 100)));
+  const nums = [
+    v.hue ? `色相 ${sgn(v.hue)}` : "",
+    v.chroma ? `艳度 ${sgn(v.chroma)}` : "",
+    v.brightness ? `明度 ${sgn(v.brightness)}` : "",
+  ].filter(Boolean).join(" · ") || "无调整";
+  return `<div class="switem"><b>${cn}</b>
+    <div class="swpair"><span class="sw" style="background:hsl(${hue} 62% 50%)"></span>
+    <span class="swarrow">→</span>
+    <span class="sw" style="background:hsl(${hue} ${sat.toFixed(0)}% ${lig.toFixed(0)}%)"></span></div>
+    <span class="swval">${nums}</span></div>`;
+}
+
+function gradingSwatch(cn, v) {
+  const chroma = Math.round(v.chroma || 0);
+  const sat = clamp100(chroma);                    // 艳度为负 → 该区段去色
+  const lig = Math.max(12, Math.min(85, 50 + (v.brightness || 0) * 0.35));
+  const col = chroma >= 0
+    ? `hsl(${Math.round(v.hue || 0)} ${sat}% ${lig.toFixed(0)}%)`
+    : `hsl(0 0% ${lig.toFixed(0)}%)`;
+  return `<div class="switem"><b>${cn}</b>
+    <div class="swpair"><span class="sw" style="background:hsl(0 0% 50%)"></span>
+    <span class="swarrow">→</span>
+    <span class="sw" style="background:${col}"></span></div>
+    <span class="swval">${Math.round(v.hue || 0)}° · 艳度 ${sgn(chroma)}${v.brightness ? ` · 明度 ${sgn(v.brightness)}` : ""}</span></div>`;
+}
+
+/* ---------- 解读（短句，规则生成，见 describe.js） ----------
+   按用户决定：解读卡只保留色彩句与曲线类型；锚点表在曲线卡片里。 */
+
+function renderInterpret(pc) {
+  const a = state.lut ? analyzeTone(state.lut) : null;
+  const parts = describeColor(pc).map((s) => `<p>${s}</p>`);
+  if (a) parts.push(`<p>曲线类型：${classifyCurve(a)}。</p>`);
+  if (!parts.length) return "";
+  return `<div class="card sect interpret"><h2>解读</h2>${parts.join("")}</div>`;
+}
+
+/* 锚点表：描述的就是左边那条曲线，所以放在曲线卡片里而不是解读卡 */
+function renderAnchorTable() {
+  const box = $("#anchorBox");
+  const a = state.pc && state.lut ? analyzeTone(state.lut) : null;
+  if (!a || a.maxDev < 1) { box.classList.add("hidden"); box.innerHTML = ""; return; }
+  const rows = anchorTable(state.lut, a);
+  box.classList.remove("hidden");
+  box.innerHTML = '<table class="anchor"><tr><th>输入%</th><th>输出%</th><th>说明</th></tr>' +
+    rows.map((r) => `<tr><td class="v">${r.x}</td><td class="v">${r.y}</td><td>${r.note}</td></tr>`).join("") +
+    '</table>';
+}
+
+function renderParams(pc) {
+  if (pc.format === "ncp") { renderColorCards(pc); return renderParamsNcp(pc); }
+
+  const hasCurve = !!pc.toneCurve;
+
+  let h = `
+    <div class="card">
+      <div class="name">${escapeHtml(pc.name || "(未命名)")}
+        <span class="tag">${pc.format === "ncp" ? "NCP" : "NP3"}</span></div>
+      ${pc.fileName ? `<div class="file">${escapeHtml(pc.fileName)}</div>` : ""}
+      ${pc.comment ? `<div class="cmt">${escapeHtml(pc.comment)}</div>` : ""}
+    </div>
+    ${renderInterpret(pc)}
+
+    <div class="card sect">
+      <h2>基础</h2>
+      <table>${rows([
+    ["锐化", pc.sharpning],
+    ["中调锐化", pc.midRangeSharpning],
+    ["清晰度", pc.clarity],
+    ["对比度", pc.contrast, hasCurve],
+    ["高光", pc.highlights, hasCurve],
+    ["阴影", pc.shadows, hasCurve],
+    ["白位", pc.whiteLevel, hasCurve],
+    ["黑位", pc.blackLevel, hasCurve],
+    ["饱和度", pc.saturation],
+  ])}</table>
+      ${hasCurve ? `<p class="muted" style="font-size:11.5px;margin-top:6px">
+        此配置含自定义色调曲线，故对比度／高光／阴影／白位／黑位固定为 0。</p>` : ""}
+    </div>`;
+
+  if (!pc.toneCurve) {
+    h += `<div class="note">此配置没有自定义色调曲线，图上显示的是恒等曲线。
+      它的风格完全由「色彩混合」「色彩分级」和基础参数决定。</div>`;
+  }
+
+  $("#side").innerHTML = h;
+  /* 色彩混合/分级卡放左栏（照片预览下方）：空间利用率高，用户不用翻底 */
+  renderColorCards(pc);
+}
+
+/* 色彩混合/分级色块卡 —— 左栏专用（NCP 无色彩数据，整块隐藏）。
+   合并为一张可折叠卡：一起展开/收起，默认折叠，状态跨文件切换保持记忆。 */
+const foldState = { color: false };
+
+function renderColorCards(pc) {
+  const box = $("#colorCards");
+  if (!pc || pc.format !== "np3") { box.classList.add("hidden"); box.innerHTML = ""; return; }
+
+  /* 重渲染前记住当前的折叠状态，避免换个文件就被弹开 */
+  const prev = $("#colorCards details.colorfold");
+  const open = prev ? prev.open : foldState.color;
+
+  const cb = pc.colorBlender || {};
+  const cbKeys = Object.keys(BLENDER_CN).filter((k) => touched(cb[k]));
+  const cg = pc.colorGrading || {};
+  const cgKeys = Object.keys(GRADING_CN).filter((k) => touched(cg[k]));
+
+  let h = "";
+  if (cbKeys.length || cgKeys.length) {
+    h = `<details class="card sect colorfold" ${open ? "open" : ""}>` +
+      `<summary>色彩混合与分级（Color Blender / Grading）</summary>`;
+    if (cbKeys.length) {
+      h += `<h3>色彩混合（Color Blender）</h3><div class="swgrid">`;
+      for (const k of cbKeys) h += blenderSwatch(BLENDER_CN[k], FAM_HUE[k], cb[k]);
+      h += `</div><p class="muted" style="font-size:11.5px;margin-top:8px">
+        色块是示意：左边为该色系的基准色，右边按艳度／明度换算。
+        色相是 ±100 的偏移量，尼康未公开它对应的角度与方向，
+        所以色块<b>不体现</b>色相偏移，方向请看数值。</p>`;
+    }
+    if (cgKeys.length) {
+      h += `<h3>色彩分级（Color Grading）</h3><div class="swgrid">`;
+      for (const k of cgKeys) h += gradingSwatch(GRADING_CN[k], cg[k]);
+      h += `</div><table style="margin-top:8px">${rows([
+        ["混合", cg.blending], ["平衡", cg.balance],
+      ])}</table><p class="muted" style="font-size:11.5px;margin-top:6px">
+        色块示意各亮度区段被染上的颜色（灰 → 目标色）。色相在这里是 0~360 的绝对值，可以直接画。</p>`;
+    }
+    h += `</details>`;
+  } else {
+    h = `<div class="card sect"><h2>色彩混合／色彩分级</h2>
+      <p class="muted" style="font-size:12.5px">这个文件没有分色域调整，风格只由色调曲线和「基础」参数决定。</p></div>`;
+  }
+
+  box.innerHTML = h;
+  box.classList.remove("hidden");
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* ---------- NCP 专用面板 ----------
+   NCP 的调节量是 0~255 原始刻度，128 为中性，0xFF 表示该项停用。
+   尼康界面用「±N 格」表示，这里换算成格数。 */
+
+const GRID = "—";
+/* 每格 = 4；但真实样本里出现过 130（+0.5 格）这种半格值，
+   取整会把半格夸大成一整格，所以保留小数，并同时给出原始字节。 */
+const stepText = (v) => (v === null || v === undefined ? GRID : (v > 128 ? "+" : "") + (v - 128) / 4);
+
+function ncpRow(label, v) {
+  const na = v === null || v === undefined;
+  return `<tr><th>${label}</th><td class="v ${na ? "na" : ""}">${stepText(v)}${na ? "" : `<i class="raw">字节 ${v}</i>`}</td></tr>`;
+}
+
+function renderParamsNcp(pc) {
+  const tc = pc.toneCurve;
+
+  let h = `
+    <div class="card">
+      <div class="name">${escapeHtml(pc.name || "(未命名)")}
+        <span class="tag">NCP</span></div>
+      ${pc.fileName ? `<div class="file">${escapeHtml(pc.fileName)}</div>` : ""}
+      <div class="cmt">基准：${escapeHtml(pc.base)} · 版本 ${escapeHtml(pc.version)}</div>
+    </div>
+    ${renderInterpret(pc)}
+
+    <div class="card sect">
+      <h2>调节量</h2>
+      <table>${ncpRow("锐化", pc.sharpning)}${ncpRow("饱和度", pc.saturation)}${ncpRow("色相", pc.hue)}</table>
+      <p class="muted" style="font-size:11.5px;margin-top:6px">
+        以中性为 0，每格 = 4；斜体是文件里的原始字节。「—」表示该位置是 0xFF（此项不适用）。<br>
+        <b>对比度和亮度无法单独读出</b>：该格式里这两项存的是标志位而非数值，
+        实际由色调曲线承担。</p>
+    </div>`;
+
+  /* 解析器读到了但含义未经样本验证的字节：只给数值，不猜语义 */
+  const rawBytes = [];
+  if (pc.monoFilter !== 0xff) rawBytes.push(["单色滤镜", pc.monoFilter]);
+  if (pc.toningType !== 0xff) rawBytes.push(["调色类型", pc.toningType]);
+  if (pc.toningAmount !== 0xff) rawBytes.push(["调色量", pc.toningAmount]);
+  if (rawBytes.length) {
+    h += `<div class="card sect"><h2>其他字段</h2><table>`;
+    for (const [k, v] of rawBytes) h += `<tr><th>${k}</th><td class="v">${v}</td></tr>`;
+    h += `</table><p class="muted" style="font-size:11.5px;margin-top:6px">
+      这几个字节在尼康界面对应单色滤镜与调色效果，但手上没有单色样本可供对照，
+      <b>这里只列原始值，不做换算</b>。</p></div>`;
+  }
+
+  if (tc) {
+    const pts = tc.points || [];
+    const ct = tc.curveType;
+    const ctName = ct >= 32 && ct < 127 ? escapeHtml(`（字符 "${String.fromCharCode(ct)}"）`) : "";
+    // 控制点是首尾两点、曲线却明显不是恒等 —— 说明实际生效的是记录里的查找表
+    const identityPts = pts.length === 2 && pts[0].x === 0 && pts[0].y === 0 &&
+      pts[1].x === 255 && pts[1].y === 255;
+    let maxDev = 0;
+    for (let i = 0; i < 256; i++) maxDev = Math.max(maxDev, Math.abs(tc.lut[i] - i));
+    h += `<div class="card sect">
+      <h2>色调曲线</h2>
+      <table>${rows([
+      ["曲线类型", "0x" + ct.toString(16) + " " + ctName],
+      ["Gamma", fmt(tc.gamma, 2)],
+      ["控制点数", pts.length],
+      ["与恒等最大偏差（0~255）", maxDev.toFixed(1)],
+    ])}</table>
+      <p class="muted" style="font-size:11.5px;margin-top:6px">控制点：${
+      pts.length ? pts.map((p) => `${p.x}→${p.y}`).join("， ") : "无（直接使用内置查找表）"
+    }</p>
+      ${identityPts && maxDev > 4 ? `<p class="muted" style="font-size:11.5px;margin-top:4px">
+        控制点虽只有一对端点，但记录内的 256 项查找表并非恒等 ——
+        图上画的是查找表，相机执行的也是查找表。</p>` : ""}
+    </div>`;
+  } else {
+    h += `<div class="note">此配置没有自定义色调曲线，风格由基准优化校准
+      「${escapeHtml(pc.base)}」和各调节量决定。</div>`;
+  }
+
+  h += `<div class="note">NCP 是尼康早期机型使用的格式，只有一组调节量，
+    <b>没有</b> NP3 的「色彩混合」「色彩分级」。在相机里导入的方式是：把文件放进存储卡的
+    <b>custompc</b> 文件夹，再从菜单「管理优化校准」载入。</div>`;
+
+  $("#side").innerHTML = h;
+}
+
+/* ---------- 照片预览 ---------- */
+
+/* 逐像素只是查表，不重复算 Math.pow。
+   这里用的就是曲线图上画的那张表：图上第 i 格的高度是 lut[i]，
+   预览把同样的映射作用在 sRGB 字节上 —— 所见即所得。
+   （相机是在自身处理域里套这条曲线的，数值上不会完全一致，页面已写明。） */
+function applyCurve(imageData) {
+  const t = state.lut;
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = t[d[i]]; d[i + 1] = t[d[i + 1]]; d[i + 2] = t[d[i + 2]];
+  }
+}
+
+/* 效果图算一次存下来；换了配置或换了图就标脏，不靠采样点做指纹 */
+const pvCache = { cv: null, dirty: true };
+
+function invalidatePreview() {
+  pvCache.dirty = true;
+}
+
+function buildEffect() {
+  if (!state.img || !pvCache.dirty) return;
+  const { width: w, height: h } = state.img;
+  const off = document.createElement("canvas");
+  off.width = w; off.height = h;
+  const g = off.getContext("2d");
+  const out = new ImageData(new Uint8ClampedArray(state.img.data), w, h);
+  if (state.lut) applyCurve(out);
+  /* NP3 的色彩混合/分级/饱和度做示意近似（NCP 无色彩数据，函数内部直接跳过） */
+  simulateColor(out, state.pc);
+  g.putImageData(out, 0, 0);
+  pvCache.cv = off; pvCache.dirty = false;
+}
+
+/* 这个文件在预览里有没有色彩模拟可看（NP3 且任一色彩字段非零） */
+function hasColorData(pc) {
+  if (!pc || pc.format !== "np3") return false;
+  if (Math.abs(pc.saturation || 0) >= 1) return true;
+  for (const k of Object.keys(pc.colorBlender || {})) {
+    const v = pc.colorBlender[k];
+    if (v && (v.chroma || v.brightness)) return true;
+  }
+  for (const k of Object.keys(pc.colorGrading || {})) {
+    const v = pc.colorGrading[k];
+    if (v && (v.chroma || v.brightness)) return true;
+  }
+  return false;
+}
+
+/* 底层放原图，上层放效果图并用 clip-path 裁出右侧 */
+function renderPreview() {
+  if (!state.img) return;
+  const { width: w, height: h } = state.img;
+  buildEffect();
+
+  const base = $("#pvBase");
+  base.width = w; base.height = h;
+  base.getContext("2d").putImageData(state.img, 0, 0);
+
+  const top = $("#pv");
+  top.width = w; top.height = h;
+  top.getContext("2d").drawImage(pvCache.cv, 0, 0);
+
+  $("#preview").classList.remove("hidden");
+  const hint = $("#pvHint");
+  hint.classList.remove("hidden");
+  hint.textContent = !state.lut && !hasColorData(state.pc)
+    ? "这个配置没有可预览的曲线和色彩数据，左右两边是一样的。"
+    : hasColorData(state.pc)
+      ? "左右拖动分隔线对比；右侧为套用色调曲线与色彩近似后。"
+      : "左右拖动分隔线对比；右侧为套用色调曲线后。";
+  positionSplit();
+}
+
+/* 拖动分隔线：只改裁切位置，不重算像素 */
+function positionSplit() {
+  const top = $("#pv"), hd = $("#pvHandle");
+  const pct = state.split * 100;
+  top.style.clipPath = `inset(0 0 0 ${pct}%)`;
+  hd.style.left = `${pct}%`;
+}
+
+function loadImage(file) {
+  const url = URL.createObjectURL(file);
+  const im = new Image();
+  im.onload = () => {
+    URL.revokeObjectURL(url);
+    const max = 1400;
+    const sc = Math.min(1, max / Math.max(im.width, im.height));
+    const w = Math.round(im.width * sc), hh = Math.round(im.height * sc);
+    const tmp = document.createElement("canvas");
+    tmp.width = w; tmp.height = hh;
+    const g = tmp.getContext("2d");
+    g.drawImage(im, 0, 0, w, hh);
+    try {
+      state.img = g.getImageData(0, 0, w, hh);
+    } catch (e) {
+      $("#pvHint").textContent = "这张图取不到像素数据（可能受来源限制），换一张本地 JPG 试试。";
+      return;
+    }
+    invalidatePreview();                    // 换了图，效果图缓存作废
+    renderPreview();
+  };
+  im.onerror = () => {
+    URL.revokeObjectURL(url);
+    const hint = $("#pvHint");
+    hint.classList.remove("hidden");
+    hint.textContent = "这张图片读不出来，换个 JPG 试试。";
+  };
+  im.src = url;
+}
+
+/* ---------- 文件入口 ---------- */
+
+/* 拖拽区的原始提示文案，报错后要用它把界面恢复回可拖状态 */
+let EMPTY_HTML = "";
+
+function showEmptyError(file, msg) {
+  const el = $("#empty");
+  el.classList.remove("hidden");
+  $("#colorCards").classList.add("hidden");
+  $("#colorCards").innerHTML = "";
+  // 拖错位置是最常见的误操作：照片该去下面的预览区，给它指路
+  const next = /\.(jpe?g|png|heic|heif|webp|gif|bmp|tiff?|dng|nef|nrw|arw|cr2|cr3|raf|orf)$/i.test(file || "")
+    ? "这看起来是照片或 RAW——照片要拖到下面<b>「套用自己的照片看看」</b>那一栏；RAW 本工具不支持。"
+    : "请确认这是尼康的优化校准文件（<b>.NCP</b> 或 <b>.NP3</b>），NP2 尚未支持。";
+  el.innerHTML = EMPTY_HTML +
+    `<div class="note err"><b>读不了${file ? "「" + escapeHtml(file) + "」" : "这个文件"}</b><br>
+     ${escapeHtml(msg)}<br>${next}</div>`;
+  $("#main").classList.add("hidden");
+  $("#samples").classList.remove("hidden");
+}
+
+async function loadFile(file) {
+  try {
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const pc = parseAny(buf, file && file.name);
+    state.pc = pc;
+    state.lut = buildLut(pc);
+    invalidatePreview();
+    $("#empty").classList.add("hidden");
+    $("#empty").innerHTML = EMPTY_HTML;
+    $("#samples").classList.add("hidden");
+    $("#main").classList.remove("hidden");
+    renderParams(pc);
+    drawCurve();
+    renderAnchorTable();
+    if (state.img) renderPreview();
+  } catch (e) {
+    showEmptyError(file && file.name, String(e.message || e));
+  }
+}
+
+function initDrop(zone, handler) {
+  const pick = () => {
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.onchange = () => inp.files[0] && handler(inp.files[0]);
+    inp.click();
+  };
+  zone.onclick = pick;
+  zone.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); }
+  });
+
+  // 经过子元素时 dragleave 会误报，用计数保持高亮稳定
+  let depth = 0;
+  zone.addEventListener("dragenter", (e) => { e.preventDefault(); if (++depth === 1) zone.classList.add("over"); });
+  zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("over"); });
+  zone.addEventListener("dragleave", () => { if (--depth <= 0) { depth = 0; zone.classList.remove("over"); } });
+  zone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    depth = 0;
+    zone.classList.remove("over");
+    const f = e.dataTransfer.files[0];
+    if (f) handler(f);
+  });
+}
+
+/* ---------- 启动 ---------- */
+
+window.addEventListener("DOMContentLoaded", () => {
+  EMPTY_HTML = $("#empty").innerHTML;
+
+  initDrop($("#empty"), loadFile);
+  initDrop($("#pvZone"), loadImage);
+  wireCurveHover();
+
+  // 内置示例：点一下就能看到效果，不必先准备文件
+  document.querySelectorAll("[data-s]").forEach((btn) => {
+    btn.onclick = () => {
+      const bin = atob(SAMPLES[btn.dataset.s]);
+      const buf = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      loadFile(new File([buf], btn.dataset.f || btn.textContent.trim()));
+    };
+  });
+
+  // 分隔线：pointer 事件支持触摸屏，拖动只改裁切位置
+  const pv = $("#preview");
+  let dragging = false;
+  const move = (e) => {
+    if (!dragging || !state.img) return;
+    const r = pv.getBoundingClientRect();
+    state.split = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    positionSplit();
+  };
+  pv.addEventListener("pointerdown", (e) => {
+    if (!state.img) return;
+    dragging = true;
+    try { pv.setPointerCapture(e.pointerId); }   // 指针已释放时会抛，忽略即可
+    catch (_) { /* 不影响拖动 */ }
+    move(e);
+  });
+  pv.addEventListener("pointermove", move);
+  pv.addEventListener("pointerup", () => { dragging = false; });
+  pv.addEventListener("pointercancel", () => { dragging = false; });
+
+  // 容器尺寸变化时才重画，避免连续 resize 造成多次渲染
+  let raf = 0;
+  new ResizeObserver(() => {
+    if (!state.pc) return;
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(drawCurve);
+  }).observe($("#curve"));
+});
+/* 预览的色彩近似模拟：把 NP3 的「色彩混合」「色彩分级」「整体饱和度」
+   按通用 HSL 规则作用到像素上。纯函数，Node 可直接测（test-colorsim.mjs）。
+
+   诚实边界（与 describe.js 同一原则）：
+   - 尼康没有公开这些参数的确切算法，这里给的是【示意近似】：
+     方向来自文件参数，幅度是本文件约定的换算，和相机直出会有明显差别；
+   - 色彩混合的色相是 ±100 偏移量且方向未公开 —— 模拟里同样不移动色相，
+     只调饱和度（艳度）与亮度；
+   - 色彩混合只作用于有彩度的像素（灰没有色系归属）；
+     色彩分级按亮度区染色（灰正是被染的对象，分离色调的意义所在）；
+   - 曲线部分不在这里：它由 app.js 的查找表精确完成，两段各自独立。 */
+
+/* 八个色系的名义色相（度）。这也是右栏色块示意用的同一张表（app.js 引用）。 */
+const FAM_HUE = { red: 0, orange: 28, yellow: 55, green: 120, cyan: 185, blue: 225, purple: 275, magenta: 310 };
+
+function rgb2hsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return [h * 60, s, l];
+}
+
+function hsl2rgb(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r, g, b;
+  if (h < 60) { r = c; g = x; b = 0; }
+  else if (h < 120) { r = x; g = c; b = 0; }
+  else if (h < 180) { r = 0; g = c; b = x; }
+  else if (h < 240) { r = 0; g = x; b = c; }
+  else if (h < 300) { r = x; g = 0; b = c; }
+  else { r = c; g = 0; b = x; }
+  return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+}
+
+/* 最短角差：从 h 转到 target 的有符号度数（-180~180） */
+function deltaDeg(target, h) {
+  return ((target - h + 540) % 360) - 180;
+}
+
+function simulateColor(img, pc) {
+  if (!pc || pc.format !== "np3") return img;
+
+  const cb = pc.colorBlender || {};
+  const fams = [];
+  for (const k of Object.keys(FAM_HUE)) {
+    const v = cb[k];
+    if (v && (v.chroma || v.brightness)) {
+      fams.push({ h: FAM_HUE[k], c: (v.chroma || 0) / 100, b: (v.brightness || 0) / 100 });
+    }
+  }
+  const cg = pc.colorGrading || {};
+  const zone = (v) => v ? { h: ((v.hue || 0) % 360 + 360) % 360, c: (v.chroma || 0) / 100, b: (v.brightness || 0) / 100 } : null;
+  const sh = zone(cg.shadows), mid = zone(cg.midTone), hi = zone(cg.highlights);
+  const gSat = (pc.saturation || 0) / 100;
+
+  if (!fams.length && !gSat && !sh && !mid && !hi) return img;
+
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const [h0, s0, l0] = rgb2hsl(d[i], d[i + 1], d[i + 2]);
+    let h = h0, s = s0, l = l0;
+
+    /* 色彩混合：按色相距离加权，只动饱和度与亮度，不动色相。
+       灰像素（s 很低）没有色系归属，跳过。 */
+    if (fams.length && s >= 0.05) {
+      let cw = 0, bw = 0;
+      for (const f of fams) {
+        const w = Math.max(0, 1 - Math.abs(deltaDeg(f.h, h)) / 90);
+        cw += w * f.c;
+        bw += w * f.b;
+      }
+      cw = Math.max(-1, Math.min(1, cw));
+      bw = Math.max(-1, Math.min(1, bw));
+      s = Math.max(0, Math.min(1, s * (1 + cw)));
+      l = Math.max(0, Math.min(1, l + bw * 0.25));
+    }
+
+    /* 整体饱和度 */
+    if (gSat) s = Math.max(0, Math.min(1, s * (1 + gSat)));
+
+    /* 色彩分级：按亮度分三区，权重和恒为 1。
+       正艳度 = 往目标色相拉 + 抬饱和度；负艳度 = 该区去色。
+       灰像素被染色时直接赋予目标色相（灰的色相本来就没有意义）。 */
+    if (sh || mid || hi) {
+      const y = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
+      const wSh = Math.max(0, Math.min(1, 1 - y / 0.5));
+      const wHi = Math.max(0, Math.min(1, (y - 0.5) / 0.5));
+      const wMid = 1 - wSh - wHi;
+      for (const [z, w] of [[sh, wSh], [mid, wMid], [hi, wHi]]) {
+        if (!z || w <= 0) continue;
+        if (z.b) l = Math.max(0, Math.min(1, l + z.b * w * 0.2));
+        if (z.c > 0) {
+          const t = Math.min(1, z.c * w);
+          if (s < 0.02) h = z.h;
+          else h += deltaDeg(z.h, h) * t * 0.5;
+          s = Math.min(1, s + (1 - s) * t * 0.35);
+        } else if (z.c < 0) {
+          s *= Math.max(0, 1 + z.c * w);
+        }
+      }
+    }
+
+    const rgb = hsl2rgb(h, s, l);
+    d[i] = rgb[0]; d[i + 1] = rgb[1]; d[i + 2] = rgb[2];
+  }
+  return img;
+}
+/* 曲线解读：把测量结果转成几句短句。纯函数，Node 可直接测（test-describe.mjs）。
+   防矛盾的结构约定（上次试验的教训，见 test-describe.mjs 顶部说明）：
+   1. 每个维度（反差/明暗/暗部/亮部/中性灰）只允许一条 else-chain 规则，互斥是结构性的；
+   2. 所有百分比输出前夹取到 0~100，无法测量就整句省略，绝不输出负数或越界值；
+   3. 反差类陈述只用斜率（gain），偏移（offset）只用于明暗陈述 —— S 曲线的中间调
+      说"反差增强"而不是"压暗 -6"。 */
+
+/* ---------- 测量：一次性算完，句子层不做任何二次推断 ---------- */
+
+function analyzeTone(lut) {
+  let maxDev = 0, mean = 0;
+  for (let i = 0; i < 256; i++) {
+    const d = Math.abs(lut[i] - i);
+    if (d > maxDev) maxDev = d;
+    mean += lut[i];
+  }
+  mean /= 256;
+  let vs = 0;
+  for (let i = 0; i < 256; i++) vs += (lut[i] - mean) * (lut[i] - mean);
+  /* 以均匀分布的标准差为基准，得到一个"反差倍数" */
+  const contrast = Math.sqrt(vs / 256) / (255 / Math.sqrt(12));
+
+  const slope = new Float64Array(255);
+  for (let i = 1; i < 256; i++) slope[i - 1] = lut[i] - lut[i - 1];
+
+  /* 单调性：单调不减的 LUT 斜率不可能为负（四舍五入也只会持平），
+     所以任何明显负斜率都是真实的局部回落 —— 色调断层/反色的来源。 */
+  let regressions = 0;
+  for (let i = 0; i < 255; i++) if (slope[i] < -0.5) regressions++;
+  const monotonic = regressions === 0;
+
+  const BANDS = [
+    ["toe", 6, 45], ["lowMid", 45, 85], ["mid", 85, 150],
+    ["highMid", 150, 205], ["shoulder", 205, 250],
+  ];
+  const bands = {};
+  for (const [name, a, b] of BANDS) {
+    let g = 0, off = 0;
+    for (let i = a; i < b; i++) g += slope[i];
+    for (let i = a; i <= b; i++) off += lut[i] - i;
+    bands[name] = { gain: g / (b - a), offset: off / (b - a + 1) };
+  }
+
+  let bias = 0;
+  for (let i = 0; i < 256; i++) bias += lut[i] - i;
+  bias /= 256;
+
+  /* 「活动区」定义：斜率 ≥0.7 的连续区间。区间之外的暗部即趾部、亮部即肩部。
+     线性/哑光曲线两端斜率都够，活动区顶满 → toeStart/shoulderStart 为 null。
+     uint8 曲线在两端是 ±1 的量化台阶，单级斜率会虚高（顶两级跳 1.0），
+     所以先做 ±4 级滑动平均再判阈值。 */
+  const W = 4;
+  const sm = new Float64Array(255);
+  for (let i = 0; i < 255; i++) {
+    let s = 0, n = 0;
+    for (let j = Math.max(0, i - W); j <= Math.min(254, i + W); j++) { s += slope[j]; n++; }
+    sm[i] = s / n;
+  }
+  let active0 = 0;
+  while (active0 < 254 && sm[active0] < 0.7) active0++;
+  let active1 = 254;
+  while (active1 > active0 && sm[active1] < 0.7) active1--;
+  /* 退化曲线（全平/全黑）的守卫：活动区跑出中段就视为没有趾肩 */
+  const toeStart = active0 > 1 && active0 < 200 ? active0 : null;      // 0~255 索引
+  const shoulderStart = active1 < 254 && active1 > 55 ? active1 + 1 : null;
+
+  /* 死黑/顶白：连续 ≥8 级（约 3%）贴死才算。
+     S 曲线过原点处天然有两三级小台阶，阈值太紧会把趾部误报成死黑。 */
+  let crushBlack = null;
+  {
+    let n = 0;
+    for (let i = 0; i < 256 && lut[i] <= 0.5; i++) n++;
+    if (n >= 8) crushBlack = n - 1;
+  }
+  let crushWhite = null;
+  {
+    let n = 0;
+    for (let i = 255; i >= 0 && lut[i] >= 254.5; i--) n++;
+    if (n >= 8) crushWhite = 256 - n;
+  }
+  const liftBlack = lut[0] > 8 ? lut[0] : null;
+  const pegWhite = lut[255] < 247 ? lut[255] : null;
+
+  /* 与恒等的交点：±0.6 滞回的符号变化，平坦区不会反复触发 */
+  const crossings = [];
+  {
+    let lastSign = 0;
+    for (let i = 0; i < 256; i++) {
+      const d = lut[i] - i;
+      const s = d > 0.6 ? 1 : d < -0.6 ? -1 : 0;
+      if (s !== 0) {
+        if (lastSign !== 0 && s !== lastSign) crossings.push(i);
+        lastSign = s;
+      }
+    }
+  }
+
+  return { maxDev, contrast, bias, bands, monotonic, regressions,
+    toeStart, shoulderStart, crushBlack, crushWhite, liftBlack, pegWhite, crossings };
+}
+
+/* ---------- 原型归类：一句话回答"它像哪个现成的东西" ----------
+   参考 Lightroom 的预设命名（线性/中对比度/强对比度）与胶片感光测定的
+   解剖词汇（趾部/直线部/肩部）。纯规则，优先级从"硬事实"到"形态倾向"：
+   恒等 → 非单调 → 端点裁切 → 哑光 → S形 → 伽马类整体偏移 → 反差倾向。 */
+
+function classifyCurve(a) {
+  if (a.maxDev < 1) return "线性（恒等）";
+  if (!a.monotonic) return `非单调（局部回落 ${a.regressions} 处，可能出现色调断层或反色）`;
+  if (a.crushBlack !== null && a.crushWhite !== null) return "双向裁切型（暗部与高光同时贴死）";
+  if (a.crushBlack !== null) return `暗部裁切型（低于约 ${pctOf(a.crushBlack)}% 全黑）`;
+  if (a.crushWhite !== null) return `高光裁切型（高于约 ${pctOf(a.crushWhite)}% 全白）`;
+  if (a.liftBlack !== null && a.pegWhite !== null) return "哑光型（黑位抬起、白位压住）";
+  if (a.liftBlack !== null) return "哑光型（黑位抬起）";
+  const sShape = a.bands.mid.gain > a.bands.toe.gain + 0.15 &&
+                 a.bands.mid.gain > a.bands.shoulder.gain + 0.15;
+  if (sShape) {
+    if (a.toeStart !== null && a.shoulderStart !== null) return "标准S形（趾部、直线部、肩部齐全）";
+    return "S形（端点区不完整）";
+  }
+  if (a.bias > 10 && a.contrast >= 0.85) return "整体提亮型（伽马类）";
+  if (a.bias < -10 && a.contrast >= 0.85) return "整体压暗型（伽马类）";
+  if (a.contrast < 0.9) return "低反差型（反S倾向）";
+  if (a.contrast > 1.12) return "线性增反差型";
+  return "轻度调整型（接近线性）";
+}
+
+/* ---------- 关键锚点表：五锚点 + 段斜率 + 端点状态 ----------
+   用户模板的采纳项：0/25/50/75/100 五个输入位的输出值，
+   段斜率按"本锚点到下一锚点"的实际平均斜率计算（不是拟合）。 */
+
+function anchorTable(lut, a) {
+  const idxs = [0, 64, 128, 191, 255];
+  const rows = [];
+  for (let r = 0; r < 5; r++) {
+    const i = idxs[r];
+    const y = Math.round((lut[i] / 255) * 100);
+    /* 段斜率：本锚点到下一锚点的实际平均斜率。
+       首行的备注 = 端点状态 + 本段斜率（否则 0→25% 的趾部压缩会被端点说明挤掉）。 */
+    const seg = (r < 4) ? (() => {
+      const next = idxs[r + 1];
+      const g = (lut[next] - lut[i]) / (next - i);
+      const tag = g > 1.15 ? "增强" : g < 0.85 ? "压缩" : "接近线性";
+      return `至 ${[0, 25, 50, 75, 100][r + 1]}%：斜率 ×${g.toFixed(2)}（${tag}）`;
+    })() : "";
+    let note;
+    if (r === 0) {
+      const end = a.crushBlack !== null ? "处于纯黑区间"
+        : lut[0] === 0 ? "端点保持纯黑"
+        : `黑位 ${lut[0]}`;
+      note = `${end}；${seg}`;
+    } else if (r === 4) {
+      note = a.crushWhite !== null ? "处于纯白区间"
+        : lut[255] === 255 ? "端点保持纯白"
+        : `白位 ${lut[255]}`;
+    } else {
+      note = seg;
+    }
+    rows.push({ x: [0, 25, 50, 75, 100][r], y, note });
+  }
+  return rows;
+}
+
+/* ---------- 句子层工具 ----------
+   明暗的文字叙述（原 describeTone）已按用户决定移除：解读卡只保留
+   色彩句与曲线类型，锚点表迁往曲线卡片。明暗的定量信息由
+   锚点表（端点/段斜率）与曲线图（悬停读数）承载。 */
+
+const pctOf = (idx) => Math.max(0, Math.min(100, Math.round((idx / 255) * 100)));
+/* 名字带 d 前缀：内联后与 app.js 同处一个 script 标签，那边已有同名工具 */
+const dsgn = (v) => (v > 0 ? "+" : "") + Math.round(v);
+
+/* ---------- 颜色：只来自文件字段，不来自曲线 ----------
+   色彩比明暗更能定义一个文件的风格（解析任何真实 NP3 都能验证：
+   色彩字段的幅度远大于明暗），所以颜色句在解读卡里排在最前
+   （见 app.js renderInterpret）。
+   色彩混合的色相是 ±100 偏移量且方向未公开，永远不描述方向；
+   色彩分级的色相是 0~360 绝对值，可以直接命名颜色。 */
+
+const FAM_CN = { red: "红", orange: "橙", yellow: "黄", green: "绿",
+  cyan: "青", blue: "蓝", purple: "紫", magenta: "洋红" };
+const HUE_NAME = [[20, "红"], [45, "橙"], [70, "黄"], [160, "绿"],
+  [200, "青"], [260, "蓝"], [300, "紫"], [345, "洋红"], [360, "红"]];
+function hueName(h) {
+  h = ((Math.round(h) % 360) + 360) % 360;
+  for (const [lim, name] of HUE_NAME) if (h < lim) return name;
+  return "红";
+}
+
+function describeColor(pc) {
+  if (!pc || pc.format !== "np3") return [];
+  const S = [];
+
+  /* 全局饱和度是色彩的第一印象，先说 */
+  if (Math.abs(pc.saturation) >= 10) S.push(`整体饱和度 ${dsgn(pc.saturation)}。`);
+
+  /* 色彩混合：枚举全部有调整的色系（按幅度从大到小），方向词描述。
+     具体数值在色块卡里有，这里负责"谁在动、往哪个方向"。 */
+  const cb = pc.colorBlender || {};
+  const fams = Object.keys(cb).filter((k) => cb[k] && (cb[k].chroma || cb[k].brightness || cb[k].hue));
+  const strong = fams
+    .map((k) => [k, Math.abs(cb[k].chroma) + Math.abs(cb[k].brightness)])
+    .filter(([, m]) => m >= 10)
+    .sort((a, b) => b[1] - a[1]);
+  if (strong.length) {
+    const words = (v) => [
+      v.chroma > 0 ? "更艳" : v.chroma < 0 ? "更灰" : "",
+      v.brightness > 0 ? "更亮" : v.brightness < 0 ? "更暗" : "",
+    ].filter(Boolean).join("");
+    const list = strong.map(([k]) => `${FAM_CN[k]}${words(cb[k])}`).join("、");
+    let line = `色彩混合：${list} —— ${
+      strong.length === 8 ? "八个色系全部有调整" : `共 ${strong.length} 个色系有调整`}`;
+    const signs = strong.filter(([k]) => cb[k].chroma).map(([k]) => Math.sign(cb[k].chroma));
+    if (signs.length >= 5 && signs.every((s) => s === signs[0])) {
+      line += signs[0] > 0 ? "，整体偏艳" : "，整体偏灰";
+    }
+    S.push(line + "。");
+  } else if (fams.length) {
+    S.push("色彩混合只有很轻微的调整。");
+  }
+
+  const cg = pc.colorGrading || {};
+  const zones = [];
+  for (const [key, cn] of [["highlights", "高光"], ["midTone", "中间调"], ["shadows", "阴影"]]) {
+    const v = cg[key];
+    if (v && Math.abs(v.chroma) >= 10) zones.push({ cn, v });
+  }
+  if (zones.length) {
+    const hi = zones.find((z) => z.cn === "高光");
+    const sh = zones.find((z) => z.cn === "阴影");
+    const mid = zones.find((z) => z.cn === "中间调");
+    /* 混合/平衡只在这里以文字出现，有值就带上 */
+    const tail = (cg.blending !== undefined || cg.balance !== undefined)
+      ? `；混合 ${cg.blending ?? "—"}、平衡 ${cg.balance ?? "—"}`
+      : "";
+    if (hi && sh && Math.abs(hi.v.hue - sh.v.hue) > 60 && hi.v.chroma >= 15 && sh.v.chroma >= 15) {
+      S.push(`分离色调：高光偏${hueName(hi.v.hue)}（艳 ${dsgn(hi.v.chroma)}）` +
+        (mid ? `、中间调偏${hueName(mid.v.hue)}（艳 ${dsgn(mid.v.chroma)}）` : "") +
+        `、阴影偏${hueName(sh.v.hue)}（艳 ${dsgn(sh.v.chroma)}）` + tail + "。");
+    } else {
+      S.push("色彩分级：" + zones.map((z) =>
+        z.v.chroma < 0
+          ? `${z.cn}被去色（艳 ${dsgn(z.v.chroma)}）`
+          : `${z.cn}被染向${hueName(z.v.hue)}（艳 ${dsgn(z.v.chroma)}）`
+      ).join("、") + tail + "。");
+    }
+  }
+  return S;
+}</script>
+
+<!-- 构建守卫：模板里的 style 带着占位符，直接打开它只会得到一个空壳。
+     检测到占位符就把整页换成指路信息；构建后占位符被替换，守卫自动失效。
+     注意：下面的 '</head>'、'</body>' 拆开写 —— ui-check/shot 会往最后一个
+     </body> 前注入探针，守卫里不能出现字面结束标签，否则锚点被抢。 -->
+<script>
+if (document.querySelector("style").textContent.indexOf("__CSS__") >= 0) {
+  const HE = '<' + 'head>', EH = '<' + '/head>', EB = '<' + '/body>';
+  document.documentElement.innerHTML =
+    HE + '<meta charset="utf-8"><title>这是构建模板，不是成品</title><style>' +
+    'body{font:15px/1.9 "Microsoft YaHei","PingFang SC",sans-serif;max-width:640px;margin:60px auto;padding:0 20px;color:#222}' +
+    'h1{font-size:20px}code{background:#f0f0f0;padding:2px 7px;border-radius:4px;font-size:13px}' +
+    'li{margin:9px 0}.box{background:#fff8e6;border:1px solid #e8d48b;border-radius:8px;padding:14px 18px}' + EH +
+    '<body><h1>你打开的是构建模板，不是成品</h1>' +
+    '<p>这个 <code>src/index.template.html</code> 只是拼装原料——样式和脚本在这里都是占位符，' +
+    '所以你看到的是一个没有渲染的空壳。</p>' +
+    '<div class="box"><p><b>请打开项目根目录的 <code>尼康优化校准查看器.html</code></b>，' +
+    '那才是双击即用的成品。也可以直接双击根目录的 <code>用浏览器打开.bat</code>。</p></div>' +
+    '<p>如果根目录没有那个文件，在项目目录里运行一次：</p>' +
+    '<ul><li><code>npm install</code></li><li><code>npm run build</code></li></ul>' +
+    '<p>（<code>npm run serve</code> 之后访问 <code>http://127.0.0.1:8791</code> 也可以。）' + EB;
+}
+</script>
+</body>
+</html>

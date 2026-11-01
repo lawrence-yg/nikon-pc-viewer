@@ -1,0 +1,20 @@
+{
+  "name": "nikon-pc-viewer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "尼康优化校准（NCP / NP3）查看器：单文件 HTML，拖进去就能看到色调曲线与各项参数",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "samples": "node make-sample.mjs",
+    "fetch-samples": "node fetch-samples.mjs",
+    "test": "node test-ncp.mjs && node test-samples.mjs && node test-reject.mjs && node test-describe.mjs && node test-colorsim.mjs",
+    "ui": "node ui-check.mjs",
+    "shot": "node shot.mjs",
+    "check": "node build.mjs && npm test && npm run ui",
+    "serve": "node serve.cjs"
+  },
+  "dependencies": {
+    "nikon-flexible-color-picture-control": "^1.0.0"
+  }
+}

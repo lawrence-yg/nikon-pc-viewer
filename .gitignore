@@ -1,0 +1,7 @@
+node_modules/
+
+# 检查脚本跑出来的临时文件
+.ui-check.html
+.shot.html
+shot-*.png
+*.log
